@@ -1,0 +1,18 @@
+{
+  "name": "Ovavat",
+  "short_name": "Ovavat",
+  "description": "Jogo diário de 5 fases: adivinhe o filme pelas reviews do Cineminha do Ovavat.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#F2F2F7",
+  "theme_color": "#ad39c2",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "assets/icon.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    }
+  ]
+}

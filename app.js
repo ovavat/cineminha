@@ -1,5 +1,5 @@
 /**
- * Cineminha do Ovavat — Jogo Diário de 5 Fases
+ * Ovavat (Cineminha do Ovavat) — Jogo Diário de 5 Fases
  * Sincronizado automaticamente com a planilha oficial de reviews das quintas-feiras.
  */
 
@@ -14,8 +14,9 @@ const STORAGE_KEYS = {
   STATS: "ovavat_stats_v1",
   DAILY_PROGRESS: "ovavat_daily_v1",
   SHEET_CACHE: "ovavat_sheet_cache_v1",
-  POSTER_CACHE: "ovavat_poster_cache_v4_strict",
-  THEME: "ovavat_theme_v2_light"
+  POSTER_CACHE: "ovavat_poster_cache_v6_posters_only",
+  THEME: "ovavat_theme_v2_light",
+  PWA_DISMISSED_DATE: "ovavat_pwa_dismissed_v1"
 };
 
 // Estado em memória
@@ -30,7 +31,23 @@ const state = {
   currentPhase: 0,     // 0..4
   answers: [],         // Array de { selectedIndex, correct, movie, author, review }
   completed: false,
-  posterMemoryCache: {}
+  posterMemoryCache: {},
+  posterInflight: {},
+  deferredInstallPrompt: null,
+  gyro: {
+    enabled: false,
+    listening: false,
+    active3D: false,
+    baseBeta: null,
+    baseGamma: null,
+    targetRx: 4,
+    targetRy: -16,
+    currentRx: 4,
+    currentRy: -16,
+    hasSensorData: false,
+    pointerInteracting: false,
+    rafId: null
+  }
 };
 
 // ============================================================================
@@ -67,7 +84,233 @@ function toggleTheme() {
 }
 
 // ============================================================================
-// 2. UTILITÁRIOS DE DATA E SEED DETERMINÍSTICO (SEMPRE IGUAL PARA TODOS NO DIA)
+// 2. DETECÇÃO DE WEBAPP (STANDALONE) E POPUP DE ATALHO APENAS NO CELULAR
+// ============================================================================
+
+function isRunningAsWebApp() {
+  return Boolean(
+    (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
+    (window.matchMedia && window.matchMedia("(display-mode: fullscreen)").matches) ||
+    window.navigator.standalone === true ||
+    document.referrer.includes("android-app://")
+  );
+}
+
+function getMobilePlatform() {
+  const ua = navigator.userAgent || navigator.vendor || window.opera || "";
+  const isIOS =
+    /iPhone|iPad|iPod/i.test(ua) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const isAndroid = /Android/i.test(ua);
+
+  if (isIOS) return "ios";
+  if (isAndroid) return "android";
+  return null; // Retorna null em qualquer PC / Desktop
+}
+
+function initWebAppInstallPrompt() {
+  window.addEventListener("beforeinstallprompt", e => {
+    e.preventDefault();
+    state.deferredInstallPrompt = e;
+    const nativeBtn = document.getElementById("btn-pwa-native-install");
+    if (nativeBtn) nativeBtn.classList.remove("hidden");
+  });
+
+  const platform = getMobilePlatform();
+  if (!platform || isRunningAsWebApp()) {
+    return;
+  }
+
+  const dismissedDate = localStorage.getItem(STORAGE_KEYS.PWA_DISMISSED_DATE);
+  if (dismissedDate === state.todayStr) {
+    return;
+  }
+
+  const iosSteps = document.getElementById("pwa-ios-steps");
+  const androidSteps = document.getElementById("pwa-android-steps");
+
+  if (platform === "ios") {
+    iosSteps?.classList.remove("hidden");
+    androidSteps?.classList.add("hidden");
+  } else {
+    iosSteps?.classList.add("hidden");
+    androidSteps?.classList.remove("hidden");
+  }
+
+  setTimeout(() => {
+    if (!isRunningAsWebApp()) {
+      document.getElementById("modal-pwa-install")?.classList.remove("hidden");
+    }
+  }, 900);
+}
+
+// ============================================================================
+// 3. BOX DE DVD 3D COM GIROSCÓPIO (SEM MOSTRAR O VERSO)
+// ============================================================================
+
+function clamp(val, min, max) {
+  return Math.max(min, Math.min(max, val));
+}
+
+function requestGyroPermissionFromUserGesture() {
+  if (state.gyro.listening) return;
+
+  if (
+    typeof DeviceOrientationEvent !== "undefined" &&
+    typeof DeviceOrientationEvent.requestPermission === "function"
+  ) {
+    DeviceOrientationEvent.requestPermission()
+      .then(status => {
+        if (status === "granted") {
+          attachGyroListener();
+        }
+      })
+      .catch(() => {});
+  } else if (typeof window.DeviceOrientationEvent !== "undefined") {
+    attachGyroListener();
+  }
+}
+
+function attachGyroListener() {
+  if (state.gyro.listening) return;
+  state.gyro.listening = true;
+
+  window.addEventListener(
+    "deviceorientation",
+    e => {
+      if (!state.gyro.active3D || state.gyro.pointerInteracting) return;
+      if (e.gamma == null || e.beta == null) return;
+
+      state.gyro.hasSensorData = true;
+
+      if (state.gyro.baseBeta === null || state.gyro.baseGamma === null) {
+        state.gyro.baseBeta = e.beta;
+        state.gyro.baseGamma = e.gamma;
+      }
+
+      const deltaGamma = e.gamma - state.gyro.baseGamma; // Inclinação esquerda/direita
+      const deltaBeta = e.beta - state.gyro.baseBeta;   // Inclinação frente/trás
+
+      // Limita entre -26° e +26° no eixo Y e -18° e +18° no eixo X para NUNCA mostrar o verso!
+      state.gyro.targetRy = clamp(deltaGamma * 0.85, -26, 26);
+      state.gyro.targetRx = clamp(-deltaBeta * 0.65, -18, 18);
+    },
+    true
+  );
+}
+
+function initDvd3dInteractions() {
+  const stage = document.getElementById("dvd-stage");
+  if (!stage) return;
+
+  function updateFromPointer(clientX, clientY) {
+    if (!state.gyro.active3D) return;
+    const rect = stage.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const nx = ((clientX - rect.left) / rect.width) * 2 - 1;  // -1..1
+    const ny = ((clientY - rect.top) / rect.height) * 2 - 1;  // -1..1
+
+    state.gyro.targetRy = clamp(nx * 25, -26, 26);
+    state.gyro.targetRx = clamp(-ny * 17, -18, 18);
+  }
+
+  stage.addEventListener("pointerdown", e => {
+    if (!state.gyro.active3D) return;
+    state.gyro.pointerInteracting = true;
+    updateFromPointer(e.clientX, e.clientY);
+  });
+
+  window.addEventListener("pointermove", e => {
+    if (!state.gyro.active3D) return;
+    if (state.gyro.pointerInteracting || e.pointerType === "mouse") {
+      // No PC com mouse ou arrastando o dedo na caixa 3D
+      const rect = stage.getBoundingClientRect();
+      const inside =
+        e.clientX >= rect.left - 40 &&
+        e.clientX <= rect.right + 40 &&
+        e.clientY >= rect.top - 40 &&
+        e.clientY <= rect.bottom + 40;
+      if (state.gyro.pointerInteracting || inside) {
+        updateFromPointer(e.clientX, e.clientY);
+      }
+    }
+  });
+
+  window.addEventListener("pointerup", () => {
+    state.gyro.pointerInteracting = false;
+  });
+}
+
+function startDvd3dAnimationLoop() {
+  if (state.gyro.rafId) cancelAnimationFrame(state.gyro.rafId);
+
+  const boxEl = document.getElementById("dvd-box-3d");
+  const shadowEl = document.getElementById("dvd-shadow");
+  const startTime = performance.now();
+
+  function tick(now) {
+    if (!state.gyro.active3D) return;
+
+    // Se o celular ainda não mexeu o giroscópio nem o dedo está tocando, faz um movimento suave de vitrine 3D
+    if (!state.gyro.hasSensorData && !state.gyro.pointerInteracting) {
+      const t = (now - startTime) * 0.0018;
+      state.gyro.targetRy = -14 + Math.sin(t) * 10; // Oscila entre -24° e -4° mostrando a lombada do DVD
+      state.gyro.targetRx = 4 + Math.cos(t * 0.8) * 5;
+    }
+
+    // Interpolação suave (lerp)
+    state.gyro.currentRx += (state.gyro.targetRx - state.gyro.currentRx) * 0.14;
+    state.gyro.currentRy += (state.gyro.targetRy - state.gyro.currentRy) * 0.14;
+
+    const rx = clamp(state.gyro.currentRx, -18, 18);
+    const ry = clamp(state.gyro.currentRy, -26, 26);
+
+    if (boxEl) {
+      const glareX = clamp(50 - ry * 1.6, 10, 90);
+      const glareY = clamp(45 + rx * 1.8, 10, 90);
+      boxEl.style.setProperty("--rx", `${rx.toFixed(2)}deg`);
+      boxEl.style.setProperty("--ry", `${ry.toFixed(2)}deg`);
+      boxEl.style.setProperty("--glare-x", `${glareX.toFixed(1)}%`);
+      boxEl.style.setProperty("--glare-y", `${glareY.toFixed(1)}%`);
+    }
+
+    if (shadowEl) {
+      const shadowX = clamp(-ry * 0.45, -12, 12);
+      shadowEl.style.setProperty("--shadow-x", `${shadowX.toFixed(1)}px`);
+    }
+
+    state.gyro.rafId = requestAnimationFrame(tick);
+  }
+
+  state.gyro.rafId = requestAnimationFrame(tick);
+}
+
+function setDvd3dMode(enable3D) {
+  const stage = document.getElementById("dvd-stage");
+  if (!stage) return;
+
+  state.gyro.active3D = enable3D;
+  state.gyro.baseBeta = null;
+  state.gyro.baseGamma = null;
+
+  if (enable3D) {
+    stage.classList.remove("flat-mode");
+    state.gyro.currentRx = 4;
+    state.gyro.currentRy = -16;
+    state.gyro.targetRx = 4;
+    state.gyro.targetRy = -16;
+    startDvd3dAnimationLoop();
+  } else {
+    stage.classList.add("flat-mode");
+    if (state.gyro.rafId) {
+      cancelAnimationFrame(state.gyro.rafId);
+      state.gyro.rafId = null;
+    }
+  }
+}
+
+// ============================================================================
+// 4. UTILITÁRIOS DE DATA E SEED DETERMINÍSTICO
 // ============================================================================
 
 function getBrazilDateParts() {
@@ -163,7 +406,7 @@ function seededShuffle(array, rng) {
 }
 
 // ============================================================================
-// 3. LEITURA E PARSE DA PLANILHA GOOGLE SHEETS (2024, 2025, 2026+)
+// 5. LEITURA E PARSE DA PLANILHA GOOGLE SHEETS (2024, 2025, 2026+)
 // ============================================================================
 
 function parseGvizTable(table) {
@@ -306,7 +549,7 @@ async function loadReviewsDataset() {
 }
 
 // ============================================================================
-// 4. CENSURA INTELIGENTE DO NOME DO FILME NA REVIEW
+// 6. CENSURA INTELIGENTE DO NOME DO FILME NA REVIEW
 // ============================================================================
 
 function stripAccentsWithMap(str) {
@@ -426,7 +669,7 @@ function formatReviewHtml(reviewText, movieTitle, isRevealed = false) {
 }
 
 // ============================================================================
-// 5. SORTEIO DAS 5 FASES DIÁRIAS (100% IGUAL PARA TODO MUNDO NO DIA)
+// 7. SORTEIO DAS 5 FASES DIÁRIAS (100% IGUAL PARA TODO MUNDO NO DIA)
 // ============================================================================
 
 function buildDailyChallenge(reviews, allMovies, dateIso) {
@@ -487,7 +730,7 @@ function buildDailyChallenge(reviews, allMovies, dateIso) {
 }
 
 // ============================================================================
-// 6. BUSCA PRECISA DE CARTAZES ONLINE (WIKIPEDIA ESTRITA + IMDB TITLES + ITUNES)
+// 8. BUSCA DE CARTAZES (CINEMETA API + WIKIPEDIA + IMDB JSONP + ITUNES)
 // ============================================================================
 
 function loadPosterCache() {
@@ -509,6 +752,41 @@ function savePosterToCache(movieTitle, url) {
     saved[movieTitle] = url;
     localStorage.setItem(STORAGE_KEYS.POSTER_CACHE, JSON.stringify(saved));
   } catch (_) {}
+}
+
+function probePosterImage(url, timeoutMs = 4500) {
+  if (!url || !isUsablePosterUrl(url)) {
+    return Promise.resolve({ ok: false, isPortrait: false, width: 0, height: 0 });
+  }
+  return new Promise(resolve => {
+    const img = new Image();
+    img.referrerPolicy = "no-referrer";
+    let done = false;
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      resolve({ ok: false, isPortrait: false, width: 0, height: 0 });
+    }, timeoutMs);
+
+    img.onload = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      const w = img.naturalWidth || 0;
+      const h = img.naturalHeight || 0;
+      const ok = w > 40 && h > 40;
+      // Cartazes oficiais têm proporção vertical (altura >= 1.12x largura)
+      const isPortrait = ok && h >= w * 1.12;
+      resolve({ ok, isPortrait, width: w, height: h });
+    };
+    img.onerror = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve({ ok: false, isPortrait: false, width: 0, height: 0 });
+    };
+    img.src = url;
+  });
 }
 
 function normalizeTitleStrict(str) {
@@ -571,14 +849,163 @@ function isUsablePosterUrl(url) {
   return true;
 }
 
-async function extractInfoboxImageFromPageId(pageId, lang = "pt") {
+async function fetchCinemetaCandidates(movieTitle, knownImdbId = null) {
+  const urls = [];
+
+  if (knownImdbId && String(knownImdbId).startsWith("tt")) {
+    urls.push(`https://images.metahub.space/poster/medium/${knownImdbId}/img`);
+    try {
+      const metaRes = await fetch(`https://v3-cinemeta.strem.io/meta/movie/${knownImdbId}.json`);
+      if (metaRes.ok) {
+        const metaData = await metaRes.json();
+        if (metaData?.meta?.poster) urls.push(metaData.meta.poster);
+      }
+    } catch (_) {}
+  }
+
+  const cleanTitle = movieTitle.replace(/#/g, "").trim();
+  const endpoints = [
+    `https://v3-cinemeta.strem.io/catalog/movie/top/search=${encodeURIComponent(cleanTitle)}.json`,
+    `https://v3-cinemeta.strem.io/catalog/series/top/search=${encodeURIComponent(cleanTitle)}.json`
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const data = await res.json();
+      const metas = (data && data.metas) || [];
+      if (metas.length === 0) continue;
+
+      const exact = metas.find(m => isSameMovieTitle(m.name, cleanTitle));
+      const candidates = exact ? [exact, ...metas.filter(m => m !== exact)] : metas.slice(0, 2);
+
+      for (const meta of candidates) {
+        const targNums = normalizeTitleStrict(cleanTitle).match(/\b\d+\b/g) || [];
+        const candNums = normalizeTitleStrict(meta.name || "").match(/\b\d+\b/g) || [];
+        if (targNums.length > 0 && candNums.length > 0 && targNums.join(",") !== candNums.join(",")) {
+          continue;
+        }
+
+        if (meta.poster) urls.push(meta.poster);
+        if (meta.id && String(meta.id).startsWith("tt")) {
+          urls.push(`https://images.metahub.space/poster/medium/${meta.id}/img`);
+          const byId = await fetchImdbPosterByIdOrQuery(meta.id);
+          if (byId) urls.push(byId);
+        }
+      }
+    } catch (_) {}
+  }
+  return urls;
+}
+
+function fetchImdbV2Jsonp(queryStr, timeoutMs = 4500) {
+  return new Promise(resolve => {
+    const norm = queryStr
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    if (!norm) return resolve([]);
+
+    const firstChar = norm[0];
+    const cbName = `imdb$${norm}`;
+    const script = document.createElement("script");
+    let done = false;
+
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      cleanup();
+      resolve([]);
+    }, timeoutMs);
+
+    function cleanup() {
+      clearTimeout(timer);
+      if (script.parentNode) script.parentNode.removeChild(script);
+      try {
+        delete window[cbName];
+      } catch (_) {
+        window[cbName] = undefined;
+      }
+    }
+
+    window[cbName] = function (data) {
+      if (done) return;
+      done = true;
+      cleanup();
+      resolve((data && data.d) || []);
+    };
+
+    script.onerror = () => {
+      if (done) return;
+      done = true;
+      cleanup();
+      resolve([]);
+    };
+
+    script.src = `https://v2.sg.media-imdb.com/suggests/${firstChar}/${norm}.json`;
+    document.head.appendChild(script);
+  });
+}
+
+async function fetchImdbPosterByIdOrQuery(queryOrTtId) {
+  const clean = queryOrTtId.replace(/#/g, "").trim();
+
   try {
-    const parseUrl = `https://${lang}.wikipedia.org/w/api.php?action=parse&origin=*&format=json&pageid=${pageId}&prop=text&section=0`;
+    const items = await fetchImdbV2Jsonp(clean);
+    const titleItems = items.filter(
+      it => it.id && String(it.id).startsWith("tt") && it.i && (it.i[0] || it.i.imageUrl)
+    );
+    if (titleItems.length > 0) {
+      const exact = titleItems.find(it => isSameMovieTitle(it.l, clean)) || titleItems[0];
+      const rawUrl = Array.isArray(exact.i) ? exact.i[0] : exact.i.imageUrl;
+      if (rawUrl) {
+        return rawUrl.replace(/\._V1_.*\.jpg$/i, "._V1_SX500.jpg");
+      }
+    }
+  } catch (_) {}
+
+  const targetUrl = `https://v3.sg.media-imdb.com/suggestion/x/${encodeURIComponent(clean)}.json`;
+  const proxyUrls = [
+    `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`
+  ];
+
+  for (const url of proxyUrls) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const data = await res.json();
+      const items = (data && data.d) || [];
+
+      const titleItems = items.filter(
+        it => it.id && String(it.id).startsWith("tt") && it.i && it.i.imageUrl
+      );
+      if (titleItems.length === 0) continue;
+
+      const exact = titleItems.find(it => isSameMovieTitle(it.l, clean)) || titleItems[0];
+      if (exact && exact.i && exact.i.imageUrl) {
+        return exact.i.imageUrl.replace(/\._V1_.*\.jpg$/i, "._V1_SX500.jpg");
+      }
+    } catch (_) {}
+  }
+
+  return null;
+}
+
+async function extractInfoboxDataFromPageId(pageId, lang = "pt") {
+  try {
+    const parseUrl = `https://${lang}.wikipedia.org/w/api.php?action=parse&origin=*&format=json&pageid=${pageId}&prop=text`;
     const res = await fetch(parseUrl);
-    if (!res.ok) return null;
+    if (!res.ok) return { images: [], imdbId: null };
     const data = await res.json();
     const html = data?.parse?.text?.["*"];
-    if (!html) return null;
+    if (!html) return { images: [], imdbId: null };
+
+    const imdbMatch = html.match(/imdb\.com\/title\/(tt\d{6,10})/i);
+    const imdbId = imdbMatch ? imdbMatch[1] : null;
 
     const doc = new DOMParser().parseFromString(html, "text/html");
     const infoboxText = (doc.querySelector(".infobox, .infobox_v2")?.textContent || "").toLowerCase();
@@ -588,9 +1015,10 @@ async function extractInfoboxImageFromPageId(pageId, lang = "pt") {
       !infoboxText.includes("direção") &&
       !infoboxText.includes("lançamento")
     ) {
-      return null;
+      return { images: [], imdbId: null };
     }
 
+    const images = [];
     const imgs = doc.querySelectorAll(".infobox img, .infobox_v2 img, table.infobox img");
     for (const img of imgs) {
       const width = parseInt(img.getAttribute("width") || "0", 10);
@@ -602,13 +1030,14 @@ async function extractInfoboxImageFromPageId(pageId, lang = "pt") {
       if (!isUsablePosterUrl(src)) continue;
 
       src = src.replace(/\/(\d+)px-/, "/500px-");
-      return src;
+      images.push(src);
     }
+    return { images, imdbId };
   } catch (_) {}
-  return null;
+  return { images: [], imdbId: null };
 }
 
-async function fetchPosterFromWikipedia(movieTitle, lang = "pt") {
+async function fetchWikipediaCandidates(movieTitle, lang = "pt") {
   const cleanTitle = movieTitle.replace(/#/g, "").trim();
   const hint =
     (window.OVAVAT_MOVIE_SEARCH_HINTS && window.OVAVAT_MOVIE_SEARCH_HINTS[movieTitle]) || "";
@@ -619,6 +1048,9 @@ async function fetchPosterFromWikipedia(movieTitle, lang = "pt") {
     `${cleanTitle} (telefilme)`,
     cleanTitle
   ].filter(Boolean);
+
+  const imageUrls = [];
+  let foundImdbId = null;
 
   for (const q of queries) {
     const endpoint = `https://${lang}.wikipedia.org/w/api.php?action=query&origin=*&format=json&generator=search&gsrsearch=${encodeURIComponent(q)}&gsrlimit=5&prop=pageimages&piprop=thumbnail|original&pithumbsize=600&pilicense=any`;
@@ -641,56 +1073,24 @@ async function fetchPosterFromWikipedia(movieTitle, lang = "pt") {
         (page.thumbnail && page.thumbnail.source) ||
         (page.original && page.original.source);
       if (isUsablePosterUrl(directImg)) {
-        return directImg;
+        imageUrls.push(directImg);
       }
 
-      const infoboxImg = await extractInfoboxImageFromPageId(page.pageid, lang);
-      if (isUsablePosterUrl(infoboxImg)) {
-        return infoboxImg;
+      const info = await extractInfoboxDataFromPageId(page.pageid, lang);
+      if (info.imdbId && !foundImdbId) {
+        foundImdbId = info.imdbId;
+      }
+      for (const u of info.images) {
+        if (!imageUrls.includes(u)) imageUrls.push(u);
+      }
+
+      if (imageUrls.length > 0 || foundImdbId) {
+        return { imageUrls, imdbId: foundImdbId };
       }
     }
   }
 
-  return null;
-}
-
-async function fetchPosterFromImdbSuggestion(movieTitle) {
-  const cleanTitle = movieTitle.replace(/#/g, "").trim();
-  const targetUrl = `https://v3.sg.media-imdb.com/suggestion/x/${encodeURIComponent(cleanTitle)}.json`;
-  const proxyUrls = [
-    `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`
-  ];
-
-  for (const url of proxyUrls) {
-    try {
-      const res = await fetch(url);
-      if (!res.ok) continue;
-      const data = await res.json();
-      const items = (data && data.d) || [];
-
-      const titleItems = items.filter(
-        it => it.id && String(it.id).startsWith("tt") && it.i && it.i.imageUrl
-      );
-
-      const exactMatch = titleItems.find(it => isSameMovieTitle(it.l, cleanTitle));
-      if (exactMatch) {
-        return exactMatch.i.imageUrl.replace(/\._V1_.*\.jpg$/i, "._V1_SX500.jpg");
-      }
-
-      const firstTitle = titleItems[0];
-      if (firstTitle) {
-        const normCand = normalizeTitleStrict(firstTitle.l);
-        const normTarg = normalizeTitleStrict(cleanTitle);
-        const targNumbers = normTarg.match(/\b\d+\b/g) || [];
-        const candNumbers = normCand.match(/\b\d+\b/g) || [];
-        if (targNumbers.join(",") === candNumbers.join(",")) {
-          return firstTitle.i.imageUrl.replace(/\._V1_.*\.jpg$/i, "._V1_SX500.jpg");
-        }
-      }
-    } catch (_) {}
-  }
-  return null;
+  return { imageUrls, imdbId: foundImdbId };
 }
 
 async function fetchPosterFromItunes(movieTitle) {
@@ -713,54 +1113,107 @@ async function resolveMoviePoster(movieTitle) {
   if (state.posterMemoryCache[movieTitle]) {
     return state.posterMemoryCache[movieTitle];
   }
+  if (state.posterInflight[movieTitle]) {
+    return state.posterInflight[movieTitle];
+  }
 
-  // 1. Wikipedia PT-BR
-  try {
-    const wikiPtUrl = await fetchPosterFromWikipedia(movieTitle, "pt");
-    if (wikiPtUrl) {
-      savePosterToCache(movieTitle, wikiPtUrl);
-      return wikiPtUrl;
+  const promise = (async () => {
+    // Guarda a primeira imagem horizontal (cena/foto do filme) APENAS como último recurso
+    // caso nenhum pôster vertical (isPortrait) exista em nenhuma fonte.
+    let fallbackNonPortraitUrl = null;
+
+    async function checkCandidate(url) {
+      if (!url) return null;
+      const probe = await probePosterImage(url);
+      if (!probe.ok) return null;
+      if (probe.isPortrait) {
+        return url; // É um cartaz vertical real!
+      }
+      if (!fallbackNonPortraitUrl) {
+        fallbackNonPortraitUrl = url;
+      }
+      return null;
     }
-  } catch (_) {}
 
-  // 2. IMDb Title Search (apenas títulos 'tt...')
-  try {
-    const imdbUrl = await fetchPosterFromImdbSuggestion(movieTitle);
-    if (imdbUrl) {
-      savePosterToCache(movieTitle, imdbUrl);
-      return imdbUrl;
+    // 1. iTunes Movie Store BR (sempre cartazes oficiais brasileiros verticais 2:3)
+    try {
+      const itunesUrl = await fetchPosterFromItunes(movieTitle);
+      const portrait = await checkCandidate(itunesUrl);
+      if (portrait) {
+        savePosterToCache(movieTitle, portrait);
+        return portrait;
+      }
+    } catch (_) {}
+
+    // 2. Wikipedia PT (verifica primeiro se a imagem é um pôster vertical + extrai o ID tt do IMDb do filme)
+    let wikiImdbId = null;
+    try {
+      const wikiPt = await fetchWikipediaCandidates(movieTitle, "pt");
+      wikiImdbId = wikiPt.imdbId;
+      for (const candidateUrl of wikiPt.imageUrls) {
+        const portrait = await checkCandidate(candidateUrl);
+        if (portrait) {
+          savePosterToCache(movieTitle, portrait);
+          return portrait;
+        }
+      }
+    } catch (_) {}
+
+    // 3. Cinemeta API + Metahub (usando tanto o ID exato do IMDb quanto o título do filme)
+    try {
+      const cinemetaUrls = await fetchCinemetaCandidates(movieTitle, wikiImdbId);
+      for (const candidateUrl of cinemetaUrls) {
+        const portrait = await checkCandidate(candidateUrl);
+        if (portrait) {
+          savePosterToCache(movieTitle, portrait);
+          return portrait;
+        }
+      }
+    } catch (_) {}
+
+    // 4. IMDb Suggest API (busca direta por ID ou título)
+    try {
+      if (wikiImdbId) {
+        const imdbById = await fetchImdbPosterByIdOrQuery(wikiImdbId);
+        const portrait = await checkCandidate(imdbById);
+        if (portrait) {
+          savePosterToCache(movieTitle, portrait);
+          return portrait;
+        }
+      }
+      const imdbByTitle = await fetchImdbPosterByIdOrQuery(movieTitle);
+      const portrait = await checkCandidate(imdbByTitle);
+      if (portrait) {
+        savePosterToCache(movieTitle, portrait);
+        return portrait;
+      }
+    } catch (_) {}
+
+    // 5. Se realmente não existir cartaz vertical em lugar nenhum, usa a outra imagem encontrada
+    if (fallbackNonPortraitUrl) {
+      savePosterToCache(movieTitle, fallbackNonPortraitUrl);
+      return fallbackNonPortraitUrl;
     }
-  } catch (_) {}
 
-  // 3. iTunes Movies BR (match estrito)
-  try {
-    const itunesUrl = await fetchPosterFromItunes(movieTitle);
-    if (itunesUrl) {
-      savePosterToCache(movieTitle, itunesUrl);
-      return itunesUrl;
-    }
-  } catch (_) {}
+    return null;
+  })();
 
-  // 4. Wikipedia EN
-  try {
-    const wikiEnUrl = await fetchPosterFromWikipedia(movieTitle, "en");
-    if (wikiEnUrl) {
-      savePosterToCache(movieTitle, wikiEnUrl);
-      return wikiEnUrl;
-    }
-  } catch (_) {}
-
-  return null;
+  state.posterInflight[movieTitle] = promise;
+  const res = await promise;
+  delete state.posterInflight[movieTitle];
+  return res;
 }
 
 function preloadDailyPosters() {
   for (const phase of state.dailyPhases) {
-    resolveMoviePoster(phase.reviewObj.movie);
+    for (const optMovie of phase.options) {
+      resolveMoviePoster(optMovie);
+    }
   }
 }
 
 // ============================================================================
-// 7. PERSISTÊNCIA DE STREAKS, PROGRESSO DO DIA E RESET DE TESTE
+// 9. PERSISTÊNCIA DE STREAKS, PROGRESSO DO DIA E RESET DE TESTE
 // ============================================================================
 
 function getStats() {
@@ -847,6 +1300,7 @@ function resetDailyGameForTesting() {
   state.currentPhase = 0;
   state.answers = [];
   state.completed = false;
+  setDvd3dMode(false);
 
   document.getElementById("summary-view").classList.add("hidden");
   document.getElementById("game-view").classList.remove("hidden");
@@ -857,7 +1311,7 @@ function resetDailyGameForTesting() {
 }
 
 // ============================================================================
-// 8. INTERFACE E RENDERIZAÇÃO
+// 10. INTERFACE E RENDERIZAÇÃO
 // ============================================================================
 
 function updateHeaderStats() {
@@ -900,11 +1354,12 @@ function renderProgressPills() {
 function renderCurrentPhase() {
   renderProgressPills();
 
-  const phaseData = state.dailyPhases[state.currentPhase];
+  const phaseIndex = state.currentPhase;
+  const phaseData = state.dailyPhases[phaseIndex];
   if (!phaseData) return;
 
   const { reviewObj, options, correctIndex } = phaseData;
-  const existingAnswer = state.answers[state.currentPhase];
+  const existingAnswer = state.answers[phaseIndex];
 
   const reviewTextEl = document.getElementById("review-text");
   reviewTextEl.innerHTML = formatReviewHtml(reviewObj.review, reviewObj.movie, Boolean(existingAnswer));
@@ -912,27 +1367,26 @@ function renderCurrentPhase() {
   const revealCard = document.getElementById("reveal-card");
   if (!existingAnswer) {
     revealCard.classList.add("hidden");
+    setDvd3dMode(false);
   }
 
   const optionsGrid = document.getElementById("options-grid");
   optionsGrid.innerHTML = "";
-  const letters = ["A", "B", "C", "D"];
 
   options.forEach((movieOption, idx) => {
     const btn = document.createElement("button");
-    btn.className = "option-btn";
+    btn.className = "option-poster-card";
     btn.type = "button";
-    btn.innerHTML = `
-      <span class="option-letter">${letters[idx]}</span>
-      <span class="option-title">${escapeHtml(movieOption)}</span>
-    `;
 
+    let statusHtml = "";
     if (existingAnswer) {
       btn.disabled = true;
       if (idx === correctIndex) {
         btn.classList.add("correct");
+        statusHtml = `<span class="opt-status-icon">✓</span>`;
       } else if (idx === existingAnswer.selectedIndex && !existingAnswer.correct) {
         btn.classList.add("wrong");
+        statusHtml = `<span class="opt-status-icon">✕</span>`;
       } else {
         btn.classList.add("dimmed");
       }
@@ -940,7 +1394,52 @@ function renderCurrentPhase() {
       btn.addEventListener("click", () => handleSelectOption(idx));
     }
 
+    const skelId = `opt-skel-${phaseIndex}-${idx}`;
+    const imgId = `opt-img-${phaseIndex}-${idx}`;
+    const fbId = `opt-fb-${phaseIndex}-${idx}`;
+
+    btn.innerHTML = `
+      <div class="opt-poster-wrap">
+        <div id="${skelId}" class="poster-skeleton"></div>
+        <img id="${imgId}" class="opt-poster-img hidden" alt="${escapeHtml(movieOption)}" referrerpolicy="no-referrer" />
+        <div id="${fbId}" class="poster-fallback hidden">
+          <span class="poster-fallback-icon">🎬</span>
+          <span class="poster-fallback-title">${escapeHtml(movieOption)}</span>
+        </div>
+      </div>
+      <div class="opt-title-bar">
+        <span class="opt-movie-title">${escapeHtml(movieOption)}</span>
+        ${statusHtml}
+      </div>
+    `;
+
     optionsGrid.appendChild(btn);
+
+    // Carrega o cartaz de cada uma das 4 opções
+    resolveMoviePoster(movieOption).then(url => {
+      const skelEl = document.getElementById(skelId);
+      const imgEl = document.getElementById(imgId);
+      const fbEl = document.getElementById(fbId);
+      if (!imgEl || !skelEl || !fbEl) return;
+
+      if (url) {
+        imgEl.onload = () => {
+          skelEl.classList.add("hidden");
+          fbEl.classList.add("hidden");
+          imgEl.classList.remove("hidden");
+        };
+        imgEl.onerror = () => {
+          skelEl.classList.add("hidden");
+          imgEl.classList.add("hidden");
+          fbEl.classList.remove("hidden");
+        };
+        imgEl.src = url;
+      } else {
+        skelEl.classList.add("hidden");
+        imgEl.classList.add("hidden");
+        fbEl.classList.remove("hidden");
+      }
+    });
   });
 
   if (existingAnswer) {
@@ -978,6 +1477,9 @@ async function showRevealCard(phaseData, isCorrect) {
   fallbackBox.classList.add("hidden");
   fallbackTitle.textContent = reviewObj.movie;
 
+  // Sempre exibe o filme correto revelado no Box de DVD 3D com giroscópio (mesmo se a pessoa errar)
+  setDvd3dMode(true);
+
   revealCard.classList.remove("hidden");
 
   const targetMovie = reviewObj.movie;
@@ -1008,6 +1510,9 @@ async function showRevealCard(phaseData, isCorrect) {
 function handleSelectOption(selectedIndex) {
   if (state.answers[state.currentPhase]) return;
 
+  // Solicita permissão do giroscópio no iOS aproveitando o clique do usuário
+  requestGyroPermissionFromUserGesture();
+
   const phaseData = state.dailyPhases[state.currentPhase];
   const isCorrect = selectedIndex === phaseData.correctIndex;
 
@@ -1030,6 +1535,7 @@ function handleSelectOption(selectedIndex) {
 }
 
 function handleNextPhase() {
+  setDvd3dMode(false);
   if (state.currentPhase + 1 < TOTAL_PHASES) {
     state.currentPhase += 1;
     saveDailyProgress();
@@ -1047,7 +1553,7 @@ function handleNextPhase() {
 }
 
 // ============================================================================
-// 9. TELA DE RESUMO FINAL E COMPARTILHAMENTO NO WHATSAPP
+// 11. TELA DE RESUMO FINAL E COMPARTILHAMENTO NO WHATSAPP (MANTIDA IGUAL)
 // ============================================================================
 
 function getScoreSubtitle(score) {
@@ -1075,6 +1581,7 @@ function buildShareText() {
 }
 
 async function showSummaryView() {
+  setDvd3dMode(false);
   document.getElementById("loading-view").classList.add("hidden");
   document.getElementById("game-view").classList.add("hidden");
   document.getElementById("summary-view").classList.remove("hidden");
@@ -1176,7 +1683,7 @@ function showToast(msg) {
 }
 
 // ============================================================================
-// 10. COUNTDOWN PARA MEIA-NOITE
+// 12. COUNTDOWN PARA MEIA-NOITE
 // ============================================================================
 
 function startCountdownTimer() {
@@ -1198,12 +1705,25 @@ function startCountdownTimer() {
 }
 
 // ============================================================================
-// 11. INICIALIZAÇÃO E EVENTOS
+// 13. INICIALIZAÇÃO E EVENTOS
 // ============================================================================
 
 function bindEvents() {
   document.getElementById("btn-theme").addEventListener("click", toggleTheme);
   document.getElementById("btn-next").addEventListener("click", handleNextPhase);
+
+  document.getElementById("btn-pwa-dismiss")?.addEventListener("click", () => {
+    localStorage.setItem(STORAGE_KEYS.PWA_DISMISSED_DATE, state.todayStr);
+    document.getElementById("modal-pwa-install")?.classList.add("hidden");
+  });
+
+  document.getElementById("btn-pwa-native-install")?.addEventListener("click", async () => {
+    if (!state.deferredInstallPrompt) return;
+    state.deferredInstallPrompt.prompt();
+    await state.deferredInstallPrompt.userChoice;
+    state.deferredInstallPrompt = null;
+    document.getElementById("modal-pwa-install")?.classList.add("hidden");
+  });
 
   // Botão secreto de Reset ao clicar no ícone do topo (com 2 etapas de confirmação)
   document.getElementById("brand-icon-trigger").addEventListener("click", () => {
@@ -1272,6 +1792,7 @@ function bindEvents() {
 
 async function initApp() {
   initTheme();
+  initDvd3dInteractions();
 
   const dateParts = getBrazilDateParts();
   state.todayStr = dateParts.iso;
@@ -1282,6 +1803,7 @@ async function initApp() {
 
   bindEvents();
   startCountdownTimer();
+  initWebAppInstallPrompt();
 
   const dataset = await loadReviewsDataset();
   state.allReviews = dataset.reviews;

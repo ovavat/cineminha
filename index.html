@@ -3,11 +3,17 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <title>Cineminha do Ovavat</title>
+  <title>Ovavat</title>
+  <meta name="application-name" content="Ovavat" />
+  <meta name="apple-mobile-web-app-title" content="Ovavat" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="description" content="Jogo diário de 5 fases: adivinhe o filme pelas reviews de quinta-feira do Cineminha do Ovavat." />
   <meta name="theme-color" content="#F2F2F7" id="meta-theme-color" />
 
-  <!-- Ícone Oficial do Cineminha do Ovavat -->
+  <!-- Manifesto PWA e Ícone Oficial -->
+  <link rel="manifest" href="manifest.json" />
   <link id="app-favicon" rel="icon" type="image/jpeg" href="assets/icon.jpg" />
   <link rel="apple-touch-icon" href="assets/icon.jpg" />
 
@@ -103,22 +109,46 @@
       <!-- Card da Review -->
       <article class="ios-card review-card" id="review-card">
         <div class="review-eyebrow">
-          <span class="eyebrow-badge">Review de Quinta</span>
+          <span class="eyebrow-badge">Review</span>
         </div>
         <blockquote class="review-quote" id="review-text"></blockquote>
         <p class="review-question" id="review-footer">Qual filme recebeu essa review?</p>
       </article>
 
-      <!-- Card de Revelação (Cartaz + Autor) -->
+      <!-- Card de Revelação (Box de DVD 3D quando acerta + Autor) -->
       <section class="ios-card reveal-card hidden" id="reveal-card" aria-live="polite">
-        <div class="reveal-body">
-          <div class="poster-container" id="poster-frame">
-            <div class="poster-skeleton" id="poster-skeleton"></div>
-            <img id="reveal-poster" class="reveal-poster hidden" alt="Cartaz do filme" referrerpolicy="no-referrer" />
-            <div id="poster-fallback" class="poster-fallback hidden">
-              <span class="poster-fallback-icon">🎬</span>
-              <span id="poster-fallback-title" class="poster-fallback-title"></span>
+        <div class="reveal-body" id="reveal-body">
+          <!-- Palco 3D do Box de DVD -->
+          <div class="dvd-stage" id="dvd-stage">
+            <div class="dvd-box-3d" id="dvd-box-3d">
+              <!-- Faces laterais do Box de DVD (visíveis quando vira em 3D) -->
+              <div class="dvd-spine">
+                <span class="dvd-spine-logo">DVD</span>
+                <span class="dvd-spine-line"></span>
+              </div>
+              <div class="dvd-edge-right"></div>
+              <div class="dvd-edge-top"></div>
+              <div class="dvd-edge-bottom"></div>
+
+              <!-- Capa Frontal do DVD -->
+              <div class="dvd-front" id="poster-frame">
+                <div class="dvd-plastic-lip">
+                  <span>DVD VIDEO</span>
+                </div>
+                <div class="dvd-artwork-wrap">
+                  <div class="poster-skeleton" id="poster-skeleton"></div>
+                  <img id="reveal-poster" class="reveal-poster hidden" alt="Cartaz do filme" referrerpolicy="no-referrer" />
+                  <div id="poster-fallback" class="poster-fallback hidden">
+                    <span class="poster-fallback-icon">🎬</span>
+                    <span id="poster-fallback-title" class="poster-fallback-title"></span>
+                  </div>
+                </div>
+                <!-- Reflexo plástico dinâmico -->
+                <div class="dvd-glare" id="dvd-glare"></div>
+                <div class="dvd-sleeve-border"></div>
+              </div>
             </div>
+            <div class="dvd-shadow" id="dvd-shadow"></div>
           </div>
 
           <div class="reveal-details">
@@ -142,13 +172,13 @@
         </div>
       </section>
 
-      <!-- Lista de 4 Alternativas Estilo iOS -->
-      <section class="options-stack" id="options-grid" aria-label="Alternativas de filmes">
+      <!-- Grade 2x2 de Alternativas com Cartazes -->
+      <section class="options-poster-grid" id="options-grid" aria-label="Alternativas de filmes">
         <!-- Gerado via JS -->
       </section>
     </main>
 
-    <!-- Tela Final / Resumo Diário -->
+    <!-- Tela Final / Resumo Diário (Mantida igual) -->
     <main id="summary-view" class="view-container hidden">
       <div class="ios-card summary-card">
         <div class="summary-top">
@@ -260,11 +290,11 @@
           </li>
           <li>
             <span class="ios-step-badge">2</span>
-            <div><strong>Escolha o filme:</strong> Selecione entre as 4 alternativas qual filme recebeu aquela review.</div>
+            <div><strong>Escolha pelo cartaz:</strong> Selecione entre os 4 filmes qual recebeu aquela review.</div>
           </li>
           <li>
             <span class="ios-step-badge">3</span>
-            <div><strong>Veja o cartaz e o autor:</strong> Ao responder, o cartaz do filme e quem escreveu a review são revelados.</div>
+            <div><strong>Colecione o DVD 3D:</strong> Ao acertar, o box de DVD 3D do filme se move com o giroscópio do celular e revela o autor da review.</div>
           </li>
           <li>
             <span class="ios-step-badge">4</span>
@@ -304,6 +334,46 @@
 
         <h3 class="dist-heading">Distribuição de Notas</h3>
         <div class="dist-bars" id="dist-bars"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Criar Atalho WebApp (Apenas Mobile fora do modo WebApp) -->
+  <div class="modal-backdrop hidden" id="modal-pwa-install">
+    <div class="ios-sheet pwa-sheet" role="dialog" aria-modal="true" aria-labelledby="pwa-title">
+      <div class="pwa-sheet-top">
+        <img src="assets/icon.jpg" alt="Ovavat" class="pwa-app-icon" />
+        <div class="pwa-title-group">
+          <h2 id="pwa-title">Instalar o app Ovavat</h2>
+          <p class="pwa-subtitle">Adicione à sua Tela de Início para jogar em tela cheia como um app nativo.</p>
+        </div>
+      </div>
+
+      <div class="pwa-steps" id="pwa-ios-steps">
+        <div class="pwa-step-item">
+          <span class="ios-step-badge">1</span>
+          <span>Toque no botão <strong>Compartilhar</strong> (ícone <span class="pwa-inline-icon">⎋</span>) na barra do navegador.</span>
+        </div>
+        <div class="pwa-step-item">
+          <span class="ios-step-badge">2</span>
+          <span>Role para baixo e selecione <strong>"Adicionar à Tela de Início"</strong>.</span>
+        </div>
+      </div>
+
+      <div class="pwa-steps hidden" id="pwa-android-steps">
+        <div class="pwa-step-item">
+          <span class="ios-step-badge">1</span>
+          <span>Toque no menu <strong>⋮</strong> do navegador e escolha <strong>"Adicionar à tela inicial"</strong> ou <strong>"Instalar aplicativo"</strong>.</span>
+        </div>
+      </div>
+
+      <div class="sheet-actions">
+        <button class="ios-btn-primary hidden" id="btn-pwa-native-install" type="button">
+          Adicionar à Tela de Início
+        </button>
+        <button class="ios-btn-secondary" id="btn-pwa-dismiss" type="button">
+          Agora não
+        </button>
       </div>
     </div>
   </div>
