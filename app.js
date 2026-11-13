@@ -27,9 +27,10 @@ const state = {
   editionNumber: 1,
   allReviews: [],
   allMovies: [],
-  dailyPhases: [],     // Array de 5 objetos: { reviewObj, options: [4 strings], correctIndex }
+  dailyPhases: [],     // Array de 5 objetos: { reviewObj, extraReviews, options: [4 strings], correctIndex }
   currentPhase: 0,     // 0..4
-  answers: [],         // Array de { selectedIndex, correct, movie, author, review }
+  answers: [],         // Array de { selectedIndex, correct, usedHint, movie, author, review }
+  phaseHints: {},      // Mapa { [phaseIdx]: { usedHint: true, reviewIdx: 1 } }
   completed: false,
   posterMemoryCache: {},
   posterInflight: {},
@@ -721,8 +722,16 @@ function buildDailyChallenge(reviews, allMovies, dateIso) {
     const options = seededShuffle([reviewObj.movie, ...distractors], phaseRng);
     const correctIndex = options.indexOf(reviewObj.movie);
 
+    // Apenas 1 review extra do mesmo filme (sorteada de forma determinística para todos no dia)
+    const extraRng = mulberry32(cyrb32(`${seedKey}-extra-reviews-${phaseIdx}-${reviewObj.movie}`));
+    const sameMovieOthers = pool.filter(
+      r => r.movie === reviewObj.movie && r.review.trim() !== reviewObj.review.trim()
+    );
+    const extraReviews = seededShuffle(sameMovieOthers, extraRng).slice(0, 1);
+
     return {
       reviewObj,
+      extraReviews,
       options,
       correctIndex
     };
@@ -1289,6 +1298,7 @@ function saveDailyProgress() {
         date: state.todayStr,
         currentPhase: state.currentPhase,
         answers: state.answers,
+        phaseHints: state.phaseHints,
         completed: state.completed
       })
     );
@@ -1299,6 +1309,7 @@ function resetDailyGameForTesting() {
   localStorage.removeItem(STORAGE_KEYS.DAILY_PROGRESS);
   state.currentPhase = 0;
   state.answers = [];
+  state.phaseHints = {};
   state.completed = false;
   setDvd3dMode(false);
 
@@ -1331,13 +1342,58 @@ function updateHeaderStats() {
   document.getElementById("header-date").textContent = state.displayDateStr;
 }
 
+function getAnswerEmoji(ans) {
+  if (!ans || !ans.correct) return "🟥";
+  return ans.usedHint ? "🟨" : "🟩";
+}
+
+function getActiveReviewForPhase(phaseIndex) {
+  const phaseData = state.dailyPhases[phaseIndex];
+  if (!phaseData) return null;
+  const allReviewsForPhase = [phaseData.reviewObj, ...(phaseData.extraReviews || [])];
+  const hintState = state.phaseHints[phaseIndex];
+  const idx = hintState && typeof hintState.reviewIdx === "number" ? hintState.reviewIdx : 0;
+  return allReviewsForPhase[idx] || phaseData.reviewObj;
+}
+
+function handleRequestAnotherReview() {
+  const phaseIndex = state.currentPhase;
+  if (state.answers[phaseIndex]) return;
+
+  const phaseData = state.dailyPhases[phaseIndex];
+  if (!phaseData) return;
+
+  const allReviewsForPhase = [phaseData.reviewObj, ...(phaseData.extraReviews || [])];
+  if (allReviewsForPhase.length <= 1) {
+    showToast("Este filme só tem 1 review cadastrada!");
+    return;
+  }
+
+  // Permite pedir apenas 1 review extra por fase
+  if (state.phaseHints[phaseIndex]?.usedHint) {
+    return;
+  }
+
+  state.phaseHints[phaseIndex] = {
+    usedHint: true,
+    reviewIdx: 1
+  };
+
+  saveDailyProgress();
+  renderCurrentPhase();
+}
+
 function renderProgressPills() {
   const bars = document.querySelectorAll(".seg-bar");
   bars.forEach((bar, idx) => {
     bar.className = "seg-bar";
     const ans = state.answers[idx];
     if (ans) {
-      bar.classList.add(ans.correct ? "correct" : "wrong");
+      if (ans.correct) {
+        bar.classList.add(ans.usedHint ? "correct-hint" : "correct");
+      } else {
+        bar.classList.add("wrong");
+      }
     } else if (idx === state.currentPhase && !state.completed) {
       bar.classList.add("active");
     }
@@ -1358,11 +1414,44 @@ function renderCurrentPhase() {
   const phaseData = state.dailyPhases[phaseIndex];
   if (!phaseData) return;
 
-  const { reviewObj, options, correctIndex } = phaseData;
+  const { options, correctIndex } = phaseData;
   const existingAnswer = state.answers[phaseIndex];
+  const activeReviewObj = getActiveReviewForPhase(phaseIndex) || phaseData.reviewObj;
+  const allReviewsForPhase = [phaseData.reviewObj, ...(phaseData.extraReviews || [])];
+  const hintState = state.phaseHints[phaseIndex] || { usedHint: false, reviewIdx: 0 };
+  const usedHint = existingAnswer ? Boolean(existingAnswer.usedHint) : Boolean(hintState.usedHint);
+
+  const eyebrowBadge = document.getElementById("review-eyebrow-badge");
+  const anotherBtn = document.getElementById("btn-another-review");
+
+  if (eyebrowBadge) {
+    if (usedHint) {
+      eyebrowBadge.className = "eyebrow-badge hint-active";
+      eyebrowBadge.textContent = "Review Extra";
+    } else {
+      eyebrowBadge.className = "eyebrow-badge";
+      eyebrowBadge.textContent = "Review";
+    }
+  }
+
+  if (anotherBtn) {
+    if (existingAnswer || usedHint) {
+      anotherBtn.classList.add("hidden");
+    } else if (allReviewsForPhase.length <= 1) {
+      anotherBtn.classList.remove("hidden");
+      anotherBtn.disabled = true;
+    } else {
+      anotherBtn.classList.remove("hidden");
+      anotherBtn.disabled = false;
+    }
+  }
 
   const reviewTextEl = document.getElementById("review-text");
-  reviewTextEl.innerHTML = formatReviewHtml(reviewObj.review, reviewObj.movie, Boolean(existingAnswer));
+  reviewTextEl.innerHTML = formatReviewHtml(
+    activeReviewObj.review,
+    activeReviewObj.movie,
+    Boolean(existingAnswer)
+  );
 
   const revealCard = document.getElementById("reveal-card");
   if (!existingAnswer) {
@@ -1382,7 +1471,7 @@ function renderCurrentPhase() {
     if (existingAnswer) {
       btn.disabled = true;
       if (idx === correctIndex) {
-        btn.classList.add("correct");
+        btn.classList.add(existingAnswer.correct && existingAnswer.usedHint ? "correct-hint" : "correct");
         statusHtml = `<span class="opt-status-icon">✓</span>`;
       } else if (idx === existingAnswer.selectedIndex && !existingAnswer.correct) {
         btn.classList.add("wrong");
@@ -1443,12 +1532,12 @@ function renderCurrentPhase() {
   });
 
   if (existingAnswer) {
-    showRevealCard(phaseData, existingAnswer.correct);
+    showRevealCard(phaseData, existingAnswer.correct, Boolean(existingAnswer.usedHint));
   }
 }
 
-async function showRevealCard(phaseData, isCorrect) {
-  const { reviewObj } = phaseData;
+async function showRevealCard(phaseData, isCorrect, usedHint = false) {
+  const activeReviewObj = getActiveReviewForPhase(state.currentPhase) || phaseData.reviewObj;
   const revealCard = document.getElementById("reveal-card");
   const badge = document.getElementById("reveal-badge");
   const titleEl = document.getElementById("reveal-movie-title");
@@ -1460,11 +1549,16 @@ async function showRevealCard(phaseData, isCorrect) {
   const fallbackBox = document.getElementById("poster-fallback");
   const fallbackTitle = document.getElementById("poster-fallback-title");
 
-  badge.className = `status-pill ${isCorrect ? "correct" : "wrong"}`;
-  badge.textContent = isCorrect ? "✓ Acertou" : "✕ Errou";
+  if (isCorrect) {
+    badge.className = `status-pill ${usedHint ? "correct-hint" : "correct"}`;
+    badge.textContent = usedHint ? "🟨 Acertou (Com outra review)" : "✓ Acertou";
+  } else {
+    badge.className = "status-pill wrong";
+    badge.textContent = "✕ Errou";
+  }
 
-  titleEl.textContent = reviewObj.movie;
-  authorEl.textContent = reviewObj.author;
+  titleEl.textContent = activeReviewObj.movie;
+  authorEl.textContent = activeReviewObj.author;
 
   if (state.currentPhase + 1 < TOTAL_PHASES) {
     nextBtnText.textContent = `Próxima Fase (${state.currentPhase + 2}/${TOTAL_PHASES})`;
@@ -1475,14 +1569,14 @@ async function showRevealCard(phaseData, isCorrect) {
   skeleton.classList.remove("hidden");
   posterImg.classList.add("hidden");
   fallbackBox.classList.add("hidden");
-  fallbackTitle.textContent = reviewObj.movie;
+  fallbackTitle.textContent = activeReviewObj.movie;
 
   // Sempre exibe o filme correto revelado no Box de DVD 3D com giroscópio (mesmo se a pessoa errar)
   setDvd3dMode(true);
 
   revealCard.classList.remove("hidden");
 
-  const targetMovie = reviewObj.movie;
+  const targetMovie = activeReviewObj.movie;
   const posterUrl = await resolveMoviePoster(targetMovie);
 
   const currentMovieNow = state.dailyPhases[state.currentPhase]?.reviewObj?.movie;
@@ -1514,14 +1608,17 @@ function handleSelectOption(selectedIndex) {
   requestGyroPermissionFromUserGesture();
 
   const phaseData = state.dailyPhases[state.currentPhase];
+  const activeReviewObj = getActiveReviewForPhase(state.currentPhase) || phaseData.reviewObj;
   const isCorrect = selectedIndex === phaseData.correctIndex;
+  const usedHint = Boolean(state.phaseHints[state.currentPhase]?.usedHint);
 
   state.answers[state.currentPhase] = {
     selectedIndex,
     correct: isCorrect,
-    movie: phaseData.reviewObj.movie,
-    author: phaseData.reviewObj.author,
-    review: phaseData.reviewObj.review
+    usedHint,
+    movie: activeReviewObj.movie,
+    author: activeReviewObj.author,
+    review: activeReviewObj.review
   };
 
   if (state.answers.length === TOTAL_PHASES) {
@@ -1570,7 +1667,7 @@ function getScoreSubtitle(score) {
 function buildShareText() {
   const score = state.answers.filter(a => a && a.correct).length;
   const stats = getStats();
-  const emojis = state.answers.map(a => (a && a.correct ? "🟩" : "🟥")).join(" ");
+  const emojis = state.answers.map(a => getAnswerEmoji(a)).join(" ");
 
   return [
     `🍿 *Cineminha do Ovavat* #${state.editionNumber} (${state.shortDateStr})`,
@@ -1596,7 +1693,7 @@ async function showSummaryView() {
   document.getElementById("summary-score-subtitle").textContent = getScoreSubtitle(score);
 
   const emojiStrip = document.getElementById("summary-emoji-strip");
-  emojiStrip.textContent = state.answers.map(a => (a && a.correct ? "🟩" : "🟥")).join("  ");
+  emojiStrip.textContent = state.answers.map(a => getAnswerEmoji(a)).join("  ");
 
   const avgPercent = stats.played > 0
     ? Math.round((stats.totalCorrect / (stats.played * TOTAL_PHASES)) * 100)
@@ -1614,7 +1711,9 @@ async function showSummaryView() {
     const phase = state.dailyPhases[i];
     const ans = state.answers[i];
     const rev = phase.reviewObj;
-    const statusEmoji = ans && ans.correct ? "🟩" : "🟥";
+    const statusEmoji = getAnswerEmoji(ans);
+    const displayedAuthor = ans && ans.author ? ans.author : rev.author;
+    const displayedQuote = ans && ans.review ? ans.review : rev.review;
 
     const item = document.createElement("div");
     item.className = "recap-item";
@@ -1625,9 +1724,9 @@ async function showSummaryView() {
       <div class="recap-details">
         <div class="recap-movie-row">
           <span class="recap-movie">${statusEmoji} ${escapeHtml(rev.movie)}</span>
-          <span class="recap-author">por ${escapeHtml(rev.author)}</span>
+          <span class="recap-author">por ${escapeHtml(displayedAuthor)}</span>
         </div>
-        <p class="recap-quote">“${escapeHtml(rev.review)}”</p>
+        <p class="recap-quote">“${escapeHtml(displayedQuote)}”</p>
       </div>
     `;
     recapList.appendChild(item);
@@ -1711,6 +1810,7 @@ function startCountdownTimer() {
 function bindEvents() {
   document.getElementById("btn-theme").addEventListener("click", toggleTheme);
   document.getElementById("btn-next").addEventListener("click", handleNextPhase);
+  document.getElementById("btn-another-review")?.addEventListener("click", handleRequestAnotherReview);
 
   document.getElementById("btn-pwa-dismiss")?.addEventListener("click", () => {
     localStorage.setItem(STORAGE_KEYS.PWA_DISMISSED_DATE, state.todayStr);
@@ -1822,6 +1922,7 @@ async function initApp() {
   if (savedDaily) {
     state.currentPhase = savedDaily.currentPhase || 0;
     state.answers = savedDaily.answers || [];
+    state.phaseHints = savedDaily.phaseHints || {};
     state.completed = Boolean(savedDaily.completed);
   }
 

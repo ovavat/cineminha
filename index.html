@@ -109,7 +109,13 @@
       <!-- Card da Review -->
       <article class="ios-card review-card" id="review-card">
         <div class="review-eyebrow">
-          <span class="eyebrow-badge">Review</span>
+          <span class="eyebrow-badge" id="review-eyebrow-badge">Review</span>
+          <button class="nav-circle-btn btn-another-review" id="btn-another-review" type="button" title="Pedir outra review" aria-label="Pedir outra review">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10"></polyline>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+            </svg>
+          </button>
         </div>
         <blockquote class="review-quote" id="review-text"></blockquote>
         <p class="review-question" id="review-footer">Qual filme recebeu essa review?</p>
@@ -290,11 +296,11 @@
           </li>
           <li>
             <span class="ios-step-badge">2</span>
-            <div><strong>Escolha pelo cartaz:</strong> Selecione entre os 4 filmes qual recebeu aquela review.</div>
+            <div><strong>Precisa de ajuda?</strong> Você pode pedir outra review do mesmo filme. Se acertar usando a nova review, seu quadrado da fase fica amarelo (🟨); se errar, continua vermelho (🟥).</div>
           </li>
           <li>
             <span class="ios-step-badge">3</span>
-            <div><strong>Colecione o DVD 3D:</strong> Ao acertar, o box de DVD 3D do filme se move com o giroscópio do celular e revela o autor da review.</div>
+            <div><strong>Escolha pelo cartaz:</strong> Selecione entre os 4 filmes qual recebeu aquela review e veja o DVD 3D com giroscópio.</div>
           </li>
           <li>
             <span class="ios-step-badge">4</span>
