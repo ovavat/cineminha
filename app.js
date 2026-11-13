@@ -154,8 +154,7 @@ function clamp(val, min, max) {
 }
 
 function requestGyroPermissionFromUserGesture() {
-  if (state.gyro.listening) return;
-
+  // No iOS 13+, solicita permissão explícita no gesto de clique
   if (
     typeof DeviceOrientationEvent !== "undefined" &&
     typeof DeviceOrientationEvent.requestPermission === "function"
@@ -167,42 +166,131 @@ function requestGyroPermissionFromUserGesture() {
         }
       })
       .catch(() => {});
-  } else if (typeof window.DeviceOrientationEvent !== "undefined") {
-    attachGyroListener();
   }
+
+  if (
+    typeof DeviceMotionEvent !== "undefined" &&
+    typeof DeviceMotionEvent.requestPermission === "function"
+  ) {
+    DeviceMotionEvent.requestPermission()
+      .then(status => {
+        if (status === "granted") {
+          attachGyroListener();
+        }
+      })
+      .catch(() => {});
+  }
+
+  attachGyroListener();
+}
+
+function normalizeAngleDelta(delta) {
+  if (delta > 180) return delta - 360;
+  if (delta < -180) return delta + 360;
+  return delta;
 }
 
 function attachGyroListener() {
   if (state.gyro.listening) return;
   state.gyro.listening = true;
 
+  let hasOrientationAngles = false;
+
+  function handleOrientationEvent(e) {
+    if (!state.gyro.active3D || state.gyro.pointerInteracting) return;
+    if (e.gamma == null || e.beta == null) return;
+    if (e.gamma === 0 && e.beta === 0 && e.alpha === 0) return;
+
+    hasOrientationAngles = true;
+    state.gyro.hasSensorData = true;
+
+    if (state.gyro.baseBeta === null || state.gyro.baseGamma === null) {
+      state.gyro.baseBeta = e.beta;
+      state.gyro.baseGamma = e.gamma;
+    }
+
+    const deltaGamma = normalizeAngleDelta(e.gamma - state.gyro.baseGamma);
+    const deltaBeta = normalizeAngleDelta(e.beta - state.gyro.baseBeta);
+
+    // Recalibra suavemente a base se a pessoa mudar muito a postura do celular
+    if (Math.abs(deltaGamma) > 45) {
+      state.gyro.baseGamma = e.gamma - Math.sign(deltaGamma) * 30;
+    }
+    if (Math.abs(deltaBeta) > 45) {
+      state.gyro.baseBeta = e.beta - Math.sign(deltaBeta) * 25;
+    }
+
+    // Limita entre -26° e +26° no eixo Y e -18° e +18° no eixo X para NUNCA mostrar o verso!
+    state.gyro.targetRy = clamp(-10 + deltaGamma * 0.95, -26, 26);
+    state.gyro.targetRx = clamp(4 - deltaBeta * 0.75, -18, 18);
+  }
+
+  // 1. Sensor de orientação padrão (iOS + Android com giroscópio)
+  window.addEventListener("deviceorientation", handleOrientationEvent, true);
+
+  // 2. Sensor de orientação absoluta do Chrome no Android
+  if ("ondeviceorientationabsolute" in window) {
+    window.addEventListener("deviceorientationabsolute", handleOrientationEvent, true);
+  }
+
+  // 3. Fallback universal para Android (DeviceMotion / Acelerômetro de gravidade)
+  // Funciona mesmo em celulares Android que não possuem giroscópio físico dedicado!
+  let baseGx = null;
+  let baseGy = null;
+
+  function applyGravityVector(gx, gy) {
+    if (!state.gyro.active3D || state.gyro.pointerInteracting || hasOrientationAngles) return;
+    if (gx == null || gy == null) return;
+
+    state.gyro.hasSensorData = true;
+
+    if (baseGx === null || baseGy === null) {
+      baseGx = gx;
+      baseGy = gy;
+    }
+
+    const dGx = gx - baseGx;
+    const dGy = gy - baseGy;
+
+    // No acelerômetro, inclinar o celular para os lados altera gx (-9.8 a +9.8 m/s²)
+    state.gyro.targetRy = clamp(-10 - dGx * 4.2, -26, 26);
+    state.gyro.targetRx = clamp(4 + dGy * 3.2, -18, 18);
+  }
+
   window.addEventListener(
-    "deviceorientation",
+    "devicemotion",
     e => {
-      if (!state.gyro.active3D || state.gyro.pointerInteracting) return;
-      if (e.gamma == null || e.beta == null) return;
-
-      state.gyro.hasSensorData = true;
-
-      if (state.gyro.baseBeta === null || state.gyro.baseGamma === null) {
-        state.gyro.baseBeta = e.beta;
-        state.gyro.baseGamma = e.gamma;
-      }
-
-      const deltaGamma = e.gamma - state.gyro.baseGamma; // Inclinação esquerda/direita
-      const deltaBeta = e.beta - state.gyro.baseBeta;   // Inclinação frente/trás
-
-      // Limita entre -26° e +26° no eixo Y e -18° e +18° no eixo X para NUNCA mostrar o verso!
-      state.gyro.targetRy = clamp(deltaGamma * 0.85, -26, 26);
-      state.gyro.targetRx = clamp(-deltaBeta * 0.65, -18, 18);
+      const ag = e.accelerationIncludingGravity;
+      if (!ag) return;
+      applyGravityVector(ag.x, ag.y);
     },
     true
   );
+
+  // 4. API nativa Generic Sensor do Chrome no Android (Accelerometer / GravitySensor)
+  try {
+    const SensorClass = window.GravitySensor || window.Accelerometer;
+    if ( typeof SensorClass === "function" ) {
+      const sensor = new SensorClass({ frequency: 30 });
+      sensor.addEventListener("reading", () => {
+        applyGravityVector(sensor.x, sensor.y);
+      });
+      sensor.start();
+    }
+  } catch (_) {}
 }
 
 function initDvd3dInteractions() {
   const stage = document.getElementById("dvd-stage");
   if (!stage) return;
+
+  // No Android, não precisa esperar permissão de clique como no iOS: já ativa os sensores ao carregar!
+  if (
+    typeof DeviceOrientationEvent === "undefined" ||
+    typeof DeviceOrientationEvent.requestPermission !== "function"
+  ) {
+    attachGyroListener();
+  }
 
   function updateFromPointer(clientX, clientY) {
     if (!state.gyro.active3D) return;
