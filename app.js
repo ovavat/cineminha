@@ -369,10 +369,37 @@ function startDvd3dAnimationLoop() {
     }
 
     if (shelfStageEl) {
-      shelfStageEl.style.setProperty("--shelf-rx", `${(rx * 0.85).toFixed(2)}deg`);
-      shelfStageEl.style.setProperty("--shelf-ry", `${(ry * 0.85).toFixed(2)}deg`);
-      shelfStageEl.style.setProperty("--shelf-glare-x", `${glareX.toFixed(1)}%`);
-      shelfStageEl.style.setProperty("--shelf-glare-y", `${glareY.toFixed(1)}%`);
+      const elapsed = now - startTime;
+      const shelfBoxes = shelfStageEl.querySelectorAll(".shelf-dvd-box");
+      shelfBoxes.forEach((dvdBox, idx) => {
+        const isFocused = dvdBox.parentElement?.classList.contains("active");
+
+        // Os DVDs que NÃO estão em foco se movem bem devagar e sutilmente para não chamar atenção
+        const freq = isFocused ? 0.0014 : 0.00045 + idx * 0.00008;
+        const phase = idx * 1.45;
+        const ampY = isFocused ? 6.5 : 1.8;
+        const ampX = isFocused ? 4.2 : 1.1;
+        const ampFloat = isFocused ? 2.5 : 0.6;
+        const gyroWeight = isFocused ? 0.78 : 0.22;
+
+        const waveY = Math.sin(elapsed * freq + phase) * ampY;
+        const waveX = Math.cos(elapsed * (freq * 0.85) + phase * 1.3) * ampX;
+        const floatY = Math.sin(elapsed * (freq * 1.1) + idx * 2.1) * ampFloat;
+
+        const baseGyroRy = (state.gyro.hasSensorData || state.gyro.pointerInteracting) ? ry * gyroWeight : -11;
+        const baseGyroRx = (state.gyro.hasSensorData || state.gyro.pointerInteracting) ? rx * gyroWeight : 3;
+
+        const indRy = clamp(baseGyroRy + waveY, -26, 26);
+        const indRx = clamp(baseGyroRx + waveX, -18, 18);
+        const indGlareX = clamp(50 - indRy * 1.6, 10, 90);
+        const indGlareY = clamp(45 + indRx * 1.8, 10, 90);
+
+        dvdBox.style.setProperty("--dvd-rx", `${indRx.toFixed(2)}deg`);
+        dvdBox.style.setProperty("--dvd-ry", `${indRy.toFixed(2)}deg`);
+        dvdBox.style.setProperty("--dvd-ty", `${floatY.toFixed(2)}px`);
+        dvdBox.style.setProperty("--dvd-glare-x", `${indGlareX.toFixed(1)}%`);
+        dvdBox.style.setProperty("--dvd-glare-y", `${indGlareY.toFixed(1)}%`);
+      });
     }
 
     if (shadowEl) {
@@ -2008,11 +2035,23 @@ function bindEvents() {
     document.getElementById("modal-pwa-install")?.classList.add("hidden");
   });
 
-  // Botão secreto de Reset ao clicar no ícone do topo (com 2 etapas de confirmação)
+  // Botão secreto de Reset ao clicar 5 vezes seguidas no ícone do topo (com 2 etapas de confirmação)
+  let logoClickCount = 0;
+  let logoClickTimer = null;
   document.getElementById("brand-icon-trigger").addEventListener("click", () => {
-    document.getElementById("reset-step-1").classList.remove("hidden");
-    document.getElementById("reset-step-2").classList.add("hidden");
-    document.getElementById("modal-reset").classList.remove("hidden");
+    logoClickCount += 1;
+    clearTimeout(logoClickTimer);
+
+    if (logoClickCount >= 5) {
+      logoClickCount = 0;
+      document.getElementById("reset-step-1").classList.remove("hidden");
+      document.getElementById("reset-step-2").classList.add("hidden");
+      document.getElementById("modal-reset").classList.remove("hidden");
+    } else {
+      logoClickTimer = setTimeout(() => {
+        logoClickCount = 0;
+      }, 1800);
+    }
   });
 
   document.getElementById("btn-reset-step1").addEventListener("click", () => {

@@ -1131,8 +1131,7 @@ html, body {
   position: relative;
   transform-style: preserve-3d;
   -webkit-transform-style: preserve-3d;
-  transform: rotateX(var(--shelf-rx)) rotateY(var(--shelf-ry));
-  transition: transform 0.1s ease-out;
+  transform: translateY(var(--dvd-ty, 0px)) rotateX(var(--dvd-rx, 4deg)) rotateY(var(--dvd-ry, -12deg));
   outline: 1px solid transparent;
 }
 
@@ -1264,7 +1263,7 @@ html, body {
   pointer-events: none;
   background:
     radial-gradient(
-      circle at var(--shelf-glare-x) var(--shelf-glare-y),
+      circle at var(--dvd-glare-x, 45%) var(--dvd-glare-y, 35%),
       rgba(255, 255, 255, 0.38) 0%,
       rgba(255, 255, 255, 0.1) 30%,
       transparent 64%
