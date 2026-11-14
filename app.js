@@ -38,13 +38,14 @@ const state = {
   gyro: {
     enabled: false,
     listening: false,
+    permissionRequested: false,
     active3D: false,
     baseBeta: null,
     baseGamma: null,
-    targetRx: 4,
-    targetRy: -16,
-    currentRx: 4,
-    currentRy: -16,
+    targetRx: 0,
+    targetRy: 0,
+    currentRx: 0,
+    currentRy: 0,
     hasSensorData: false,
     pointerInteracting: false,
     rafId: null
@@ -154,7 +155,10 @@ function clamp(val, min, max) {
 }
 
 function requestGyroPermissionFromUserGesture() {
-  // No iOS 13+, solicita permissão explícita no gesto de clique
+  if (state.gyro.listening || state.gyro.permissionRequested) return;
+  state.gyro.permissionRequested = true;
+
+  // No iOS 13+, solicita apenas 1 vez por sessão a permissão do DeviceOrientationEvent
   if (
     typeof DeviceOrientationEvent !== "undefined" &&
     typeof DeviceOrientationEvent.requestPermission === "function"
@@ -166,19 +170,7 @@ function requestGyroPermissionFromUserGesture() {
         }
       })
       .catch(() => {});
-  }
-
-  if (
-    typeof DeviceMotionEvent !== "undefined" &&
-    typeof DeviceMotionEvent.requestPermission === "function"
-  ) {
-    DeviceMotionEvent.requestPermission()
-      .then(status => {
-        if (status === "granted") {
-          attachGyroListener();
-        }
-      })
-      .catch(() => {});
+    return;
   }
 
   attachGyroListener();
@@ -220,9 +212,9 @@ function attachGyroListener() {
       state.gyro.baseBeta = e.beta - Math.sign(deltaBeta) * 25;
     }
 
-    // Limita entre -26° e +26° no eixo Y e -18° e +18° no eixo X para NUNCA mostrar o verso!
-    state.gyro.targetRy = clamp(-10 + deltaGamma * 0.95, -26, 26);
-    state.gyro.targetRx = clamp(4 - deltaBeta * 0.75, -18, 18);
+    // Eixo centralizado em 0° (reto) na posição em que a pessoa segura o celular!
+    state.gyro.targetRy = clamp(deltaGamma * 0.95, -26, 26);
+    state.gyro.targetRx = clamp(-deltaBeta * 0.75, -18, 18);
   }
 
   // 1. Sensor de orientação padrão (iOS + Android com giroscópio)
@@ -252,9 +244,9 @@ function attachGyroListener() {
     const dGx = gx - baseGx;
     const dGy = gy - baseGy;
 
-    // No acelerômetro, inclinar o celular para os lados altera gx (-9.8 a +9.8 m/s²)
-    state.gyro.targetRy = clamp(-10 - dGx * 4.2, -26, 26);
-    state.gyro.targetRx = clamp(4 + dGy * 3.2, -18, 18);
+    // Eixo centralizado em 0° (reto)
+    state.gyro.targetRy = clamp(-dGx * 4.2, -26, 26);
+    state.gyro.targetRx = clamp(dGy * 3.2, -18, 18);
   }
 
   window.addEventListener(
@@ -421,10 +413,10 @@ function setDvd3dMode(enable3D) {
 
   if (enable3D) {
     stage.classList.remove("flat-mode");
-    state.gyro.currentRx = 4;
-    state.gyro.currentRy = -16;
-    state.gyro.targetRx = 4;
-    state.gyro.targetRy = -16;
+    state.gyro.currentRx = 0;
+    state.gyro.currentRy = 0;
+    state.gyro.targetRx = 0;
+    state.gyro.targetRy = 0;
     startDvd3dAnimationLoop();
   } else {
     stage.classList.add("flat-mode");
@@ -1812,6 +1804,8 @@ function renderSummaryDvdShelf() {
 
   function selectShelfDvd(selectedIdx) {
     activeIdx = selectedIdx;
+    state.gyro.baseBeta = null;
+    state.gyro.baseGamma = null;
     const stageWidth = shelfStage.clientWidth || 300;
     // Posição horizontal fixa em ordem (Fase 1..5 da esquerda pra direita), contida dentro do box central
     const stepX = Math.max(36, Math.min(48, (stageWidth - 114) / 4));
@@ -1825,7 +1819,7 @@ function renderSummaryDvdShelf() {
       const tx = slotFromCenter * stepX;
       const ty = isSelected ? -6 : distFromSelected * 2;
       const tz = isSelected ? 38 : -distFromSelected * 14;
-      const ry = isSelected ? -10 : slotFromCenter * -5;
+      const ry = isSelected ? 0 : slotFromCenter * -5;
       const rz = isSelected ? 0 : slotFromCenter * 2;
       const scale = isSelected ? 1.1 : 0.92;
 
