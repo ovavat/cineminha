@@ -374,31 +374,29 @@ function startDvd3dAnimationLoop() {
       shelfBoxes.forEach((dvdBox, idx) => {
         const isFocused = dvdBox.parentElement?.classList.contains("active");
 
-        // Os DVDs que NÃO estão em foco se movem bem devagar e sutilmente para não chamar atenção
-        const freq = isFocused ? 0.0014 : 0.00045 + idx * 0.00008;
-        const phase = idx * 1.45;
-        const ampY = isFocused ? 6.5 : 1.8;
-        const ampX = isFocused ? 4.2 : 1.1;
-        const ampFloat = isFocused ? 2.5 : 0.6;
-        const gyroWeight = isFocused ? 0.78 : 0.22;
+        if (isFocused) {
+          // O DVD em foco responde 100% ao giroscópio / toque (igual ao DVD das fases)
+          dvdBox.style.setProperty("--dvd-rx", `${rx.toFixed(2)}deg`);
+          dvdBox.style.setProperty("--dvd-ry", `${ry.toFixed(2)}deg`);
+          dvdBox.style.setProperty("--dvd-ty", `0px`);
+          dvdBox.style.setProperty("--dvd-glare-x", `${glareX.toFixed(1)}%`);
+          dvdBox.style.setProperty("--dvd-glare-y", `${glareY.toFixed(1)}%`);
+        } else {
+          // Os DVDs de trás NÃO são afetados pelo giroscópio e se movem bem devagar
+          const freq = 0.00042 + idx * 0.00007;
+          const phase = idx * 1.45;
+          const indRy = -11 + Math.sin(elapsed * freq + phase) * 1.6;
+          const indRx = 3 + Math.cos(elapsed * (freq * 0.85) + phase * 1.3) * 1.0;
+          const floatY = Math.sin(elapsed * (freq * 1.1) + idx * 2.1) * 0.5;
+          const indGlareX = clamp(50 - indRy * 1.4, 15, 85);
+          const indGlareY = clamp(45 + indRx * 1.5, 15, 85);
 
-        const waveY = Math.sin(elapsed * freq + phase) * ampY;
-        const waveX = Math.cos(elapsed * (freq * 0.85) + phase * 1.3) * ampX;
-        const floatY = Math.sin(elapsed * (freq * 1.1) + idx * 2.1) * ampFloat;
-
-        const baseGyroRy = (state.gyro.hasSensorData || state.gyro.pointerInteracting) ? ry * gyroWeight : -11;
-        const baseGyroRx = (state.gyro.hasSensorData || state.gyro.pointerInteracting) ? rx * gyroWeight : 3;
-
-        const indRy = clamp(baseGyroRy + waveY, -26, 26);
-        const indRx = clamp(baseGyroRx + waveX, -18, 18);
-        const indGlareX = clamp(50 - indRy * 1.6, 10, 90);
-        const indGlareY = clamp(45 + indRx * 1.8, 10, 90);
-
-        dvdBox.style.setProperty("--dvd-rx", `${indRx.toFixed(2)}deg`);
-        dvdBox.style.setProperty("--dvd-ry", `${indRy.toFixed(2)}deg`);
-        dvdBox.style.setProperty("--dvd-ty", `${floatY.toFixed(2)}px`);
-        dvdBox.style.setProperty("--dvd-glare-x", `${indGlareX.toFixed(1)}%`);
-        dvdBox.style.setProperty("--dvd-glare-y", `${indGlareY.toFixed(1)}%`);
+          dvdBox.style.setProperty("--dvd-rx", `${indRx.toFixed(2)}deg`);
+          dvdBox.style.setProperty("--dvd-ry", `${indRy.toFixed(2)}deg`);
+          dvdBox.style.setProperty("--dvd-ty", `${floatY.toFixed(2)}px`);
+          dvdBox.style.setProperty("--dvd-glare-x", `${indGlareX.toFixed(1)}%`);
+          dvdBox.style.setProperty("--dvd-glare-y", `${indGlareY.toFixed(1)}%`);
+        }
       });
     }
 
@@ -1870,6 +1868,7 @@ function renderSummaryDvdShelf() {
     `;
 
     item.addEventListener("click", () => {
+      requestGyroPermissionFromUserGesture();
       selectShelfDvd(idx);
     });
 
@@ -2085,8 +2084,15 @@ function bindEvents() {
 
   document.getElementById("btn-share-whatsapp").addEventListener("click", () => {
     const text = buildShareText();
-    const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
-    window.open(waUrl, "_blank", "noopener,noreferrer");
+    const mobilePlatform = getMobilePlatform();
+    if (mobilePlatform) {
+      // No iOS/Android (especialmente dentro do WebApp), abre o protocolo nativo whatsapp://
+      // direto na janela atual para não criar uma aba intermediária em branco ao voltar pro app!
+      window.location.href = `whatsapp://send?text=${encodeURIComponent(text)}`;
+    } else {
+      const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+      window.open(waUrl, "_blank", "noopener,noreferrer");
+    }
   });
 
   document.getElementById("btn-help").addEventListener("click", () => {
