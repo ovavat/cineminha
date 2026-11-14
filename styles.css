@@ -774,6 +774,8 @@ html, body {
 .dvd-artwork-wrap {
   position: relative;
   flex: 1;
+  min-height: 0;
+  height: calc(100% - 11px);
   width: 100%;
   border-radius: 1px 3px 3px 1px;
   background: var(--bg-secondary);
@@ -847,6 +849,8 @@ html, body {
 }
 
 .reveal-poster {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -856,6 +860,12 @@ html, body {
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
   transform: translateZ(0.1px);
+}
+
+.dvd-artwork-wrap .poster-skeleton,
+.dvd-artwork-wrap .poster-fallback {
+  position: absolute;
+  inset: 0;
 }
 
 .poster-fallback {
@@ -1048,6 +1058,7 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  overflow: hidden;
 }
 
 .summary-top {
@@ -1071,6 +1082,248 @@ html, body {
   font-size: 0.88rem;
   color: var(--text-secondary);
   font-weight: 500;
+}
+
+/* ============================================================================
+   VITRINE 3D DOS 5 DVDS DO DIA (EM FILA 1..5, CLICAR TRAZ PARA A CAMADA DA FRENTE)
+   ============================================================================ */
+.summary-shelf-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: -8px;
+  padding: 0 0 4px;
+  user-select: none;
+}
+
+.summary-shelf-stage {
+  --shelf-rx: 5deg;
+  --shelf-ry: -12deg;
+  --shelf-glare-x: 45%;
+  --shelf-glare-y: 35%;
+  position: relative;
+  width: 100%;
+  height: 186px;
+  perspective: 980px;
+  -webkit-perspective: 980px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+  touch-action: pan-y;
+}
+
+.shelf-dvd-item {
+  position: absolute;
+  width: 102px;
+  height: 150px;
+  transform-style: preserve-3d;
+  -webkit-transform-style: preserve-3d;
+  transition: transform 0.38s cubic-bezier(0.22, 1, 0.36, 1), filter 0.3s ease;
+  cursor: pointer;
+  outline: 1px solid transparent;
+}
+
+.shelf-dvd-box {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  transform-style: preserve-3d;
+  -webkit-transform-style: preserve-3d;
+  transform: rotateX(var(--shelf-rx)) rotateY(var(--shelf-ry));
+  transition: transform 0.1s ease-out;
+  outline: 1px solid transparent;
+}
+
+.shelf-dvd-box::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: #14131a;
+  border-radius: 3px 6px 6px 3px;
+  transform: translateZ(-6px);
+  outline: 1px solid transparent;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.shelf-dvd-spine {
+  position: absolute;
+  width: 12px;
+  height: 148px;
+  left: calc(50% - 6px);
+  top: 1px;
+  background: linear-gradient(90deg, #0f0e13 0%, #272430 50%, #15141b 100%);
+  transform: rotateY(-90deg) translateZ(50.5px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 0;
+  outline: 1px solid transparent;
+  border: 0.5px solid rgba(255, 255, 255, 0.12);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.shelf-dvd-spine span {
+  writing-mode: vertical-rl;
+  font-size: 0.42rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  color: rgba(255, 255, 255, 0.65);
+  font-style: italic;
+}
+
+.shelf-dvd-edge-right {
+  position: absolute;
+  width: 12px;
+  height: 148px;
+  left: calc(50% - 6px);
+  top: 1px;
+  background: #1b1922;
+  transform: rotateY(90deg) translateZ(50.5px);
+  outline: 1px solid transparent;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.shelf-dvd-front {
+  position: absolute;
+  inset: 0;
+  background: #1a1822;
+  border-radius: 3px 6px 6px 3px;
+  transform: translateZ(6px);
+  display: flex;
+  flex-direction: column;
+  padding: 3px 3px 3px 5px;
+  outline: 1px solid transparent;
+  border: 0.5px solid rgba(255, 255, 255, 0.15);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  box-shadow:
+    0 8px 18px rgba(0, 0, 0, 0.22),
+    inset 2px 0 4px rgba(255, 255, 255, 0.16);
+}
+
+.shelf-dvd-item.active .shelf-dvd-front {
+  border-color: var(--accent);
+  box-shadow:
+    0 12px 26px rgba(173, 57, 194, 0.28),
+    inset 2px 0 4px rgba(255, 255, 255, 0.22);
+}
+
+.shelf-dvd-lip {
+  height: 9px;
+  background: linear-gradient(180deg, #272432 0%, #17151e 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 2px 3px 0 0;
+  flex-shrink: 0;
+}
+
+.shelf-dvd-lip span {
+  font-size: 0.34rem;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  color: rgba(255, 255, 255, 0.48);
+  font-style: italic;
+}
+
+.shelf-dvd-art {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  height: calc(100% - 9px);
+  width: 100%;
+  background: var(--bg-secondary);
+  border-radius: 1px 3px 3px 1px;
+  outline: 1px solid transparent;
+}
+
+.shelf-dvd-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: 1px 3px 3px 1px;
+  outline: 1px solid transparent;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transform: translateZ(0.1px);
+}
+
+.shelf-dvd-glare {
+  position: absolute;
+  inset: 0;
+  border-radius: 1px 3px 3px 1px;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      circle at var(--shelf-glare-x) var(--shelf-glare-y),
+      rgba(255, 255, 255, 0.38) 0%,
+      rgba(255, 255, 255, 0.1) 30%,
+      transparent 64%
+    ),
+    linear-gradient(115deg, transparent 22%, rgba(255, 255, 255, 0.14) 48%, transparent 56%);
+  mix-blend-mode: screen;
+  z-index: 3;
+}
+
+.shelf-status-dot {
+  position: absolute;
+  bottom: 5px;
+  right: 5px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 0.66rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #FFFFFF;
+  z-index: 5;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  border: 1.5px solid rgba(255, 255, 255, 0.85);
+}
+
+.shelf-status-dot.correct {
+  background: var(--ios-green);
+}
+
+.shelf-status-dot.correct-hint {
+  background: var(--ios-yellow);
+  color: #1C1C1E;
+}
+
+.shelf-status-dot.wrong {
+  background: var(--ios-red);
+}
+
+.summary-shelf-caption {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 13px;
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  border: 0.5px solid var(--separator);
+  max-width: 100%;
+}
+
+.shelf-movie-name {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .emoji-pill-box {

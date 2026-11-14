@@ -292,9 +292,9 @@ function initDvd3dInteractions() {
     attachGyroListener();
   }
 
-  function updateFromPointer(clientX, clientY) {
-    if (!state.gyro.active3D) return;
-    const rect = stage.getBoundingClientRect();
+  function updateFromPointer(clientX, clientY, targetStage) {
+    if (!state.gyro.active3D || !targetStage) return;
+    const rect = targetStage.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
     const nx = ((clientX - rect.left) / rect.width) * 2 - 1;  // -1..1
     const ny = ((clientY - rect.top) / rect.height) * 2 - 1;  // -1..1
@@ -306,21 +306,25 @@ function initDvd3dInteractions() {
   stage.addEventListener("pointerdown", e => {
     if (!state.gyro.active3D) return;
     state.gyro.pointerInteracting = true;
-    updateFromPointer(e.clientX, e.clientY);
+    updateFromPointer(e.clientX, e.clientY, stage);
   });
 
   window.addEventListener("pointermove", e => {
     if (!state.gyro.active3D) return;
+    const shelfStage = document.getElementById("summary-shelf-stage");
+    const activeStage = !document.getElementById("summary-view")?.classList.contains("hidden") && shelfStage
+      ? shelfStage
+      : stage;
+
     if (state.gyro.pointerInteracting || e.pointerType === "mouse") {
-      // No PC com mouse ou arrastando o dedo na caixa 3D
-      const rect = stage.getBoundingClientRect();
+      const rect = activeStage.getBoundingClientRect();
       const inside =
         e.clientX >= rect.left - 40 &&
         e.clientX <= rect.right + 40 &&
         e.clientY >= rect.top - 40 &&
         e.clientY <= rect.bottom + 40;
       if (state.gyro.pointerInteracting || inside) {
-        updateFromPointer(e.clientX, e.clientY);
+        updateFromPointer(e.clientX, e.clientY, activeStage);
       }
     }
   });
@@ -335,6 +339,7 @@ function startDvd3dAnimationLoop() {
 
   const boxEl = document.getElementById("dvd-box-3d");
   const shadowEl = document.getElementById("dvd-shadow");
+  const shelfStageEl = document.getElementById("summary-shelf-stage");
   const startTime = performance.now();
 
   function tick(now) {
@@ -353,14 +358,21 @@ function startDvd3dAnimationLoop() {
 
     const rx = clamp(state.gyro.currentRx, -18, 18);
     const ry = clamp(state.gyro.currentRy, -26, 26);
+    const glareX = clamp(50 - ry * 1.6, 10, 90);
+    const glareY = clamp(45 + rx * 1.8, 10, 90);
 
     if (boxEl) {
-      const glareX = clamp(50 - ry * 1.6, 10, 90);
-      const glareY = clamp(45 + rx * 1.8, 10, 90);
       boxEl.style.setProperty("--rx", `${rx.toFixed(2)}deg`);
       boxEl.style.setProperty("--ry", `${ry.toFixed(2)}deg`);
       boxEl.style.setProperty("--glare-x", `${glareX.toFixed(1)}%`);
       boxEl.style.setProperty("--glare-y", `${glareY.toFixed(1)}%`);
+    }
+
+    if (shelfStageEl) {
+      shelfStageEl.style.setProperty("--shelf-rx", `${(rx * 0.85).toFixed(2)}deg`);
+      shelfStageEl.style.setProperty("--shelf-ry", `${(ry * 0.85).toFixed(2)}deg`);
+      shelfStageEl.style.setProperty("--shelf-glare-x", `${glareX.toFixed(1)}%`);
+      shelfStageEl.style.setProperty("--shelf-glare-y", `${glareY.toFixed(1)}%`);
     }
 
     if (shadowEl) {
@@ -1765,13 +1777,96 @@ function buildShareText() {
   ].join("\n");
 }
 
+function renderSummaryDvdShelf() {
+  const shelfStage = document.getElementById("summary-shelf-stage");
+  const shelfCaption = document.getElementById("shelf-movie-name");
+  if (!shelfStage) return;
+
+  shelfStage.innerHTML = "";
+  let activeIdx = 0; // Começa com a Fase 1 na camada mais à frente
+
+  function selectShelfDvd(selectedIdx) {
+    activeIdx = selectedIdx;
+    const stageWidth = shelfStage.clientWidth || 300;
+    // Posição horizontal fixa em ordem (Fase 1..5 da esquerda pra direita), contida dentro do box central
+    const stepX = Math.max(36, Math.min(48, (stageWidth - 114) / 4));
+
+    const items = shelfStage.querySelectorAll(".shelf-dvd-item");
+    items.forEach((item, idx) => {
+      const slotFromCenter = idx - 2; // -2, -1, 0, +1, +2 (sempre em ordem 1..5!)
+      const distFromSelected = Math.abs(idx - selectedIdx);
+      const isSelected = idx === selectedIdx;
+
+      const tx = slotFromCenter * stepX;
+      const ty = isSelected ? -6 : distFromSelected * 2;
+      const tz = isSelected ? 38 : -distFromSelected * 14;
+      const ry = isSelected ? -10 : slotFromCenter * -5;
+      const rz = isSelected ? 0 : slotFromCenter * 2;
+      const scale = isSelected ? 1.1 : 0.92;
+
+      item.classList.toggle("active", isSelected);
+      item.style.zIndex = String(isSelected ? 30 : 20 - distFromSelected * 3);
+      item.style.transform = `translate3d(${tx.toFixed(1)}px, ${ty.toFixed(1)}px, ${tz}px) rotateY(${ry}deg) rotateZ(${rz}deg) scale(${scale})`;
+      item.style.filter = isSelected ? "brightness(1.04)" : "brightness(0.84)";
+    });
+
+    const phase = state.dailyPhases[selectedIdx];
+    const ans = state.answers[selectedIdx];
+    if (phase && shelfCaption) {
+      const emoji = getAnswerEmoji(ans);
+      shelfCaption.textContent = `${emoji} Fase ${selectedIdx + 1}: ${phase.reviewObj.movie}`;
+    }
+  }
+
+  state.dailyPhases.forEach((phase, idx) => {
+    const rev = phase.reviewObj;
+    const ans = state.answers[idx];
+    const statusClass = ans && ans.correct ? (ans.usedHint ? "correct-hint" : "correct") : "wrong";
+    const statusSymbol = ans && ans.correct ? "✓" : "✕";
+    const imgId = `shelf-dvd-img-${idx}`;
+
+    const item = document.createElement("div");
+    item.className = "shelf-dvd-item";
+    item.innerHTML = `
+      <div class="shelf-dvd-box">
+        <div class="shelf-dvd-spine"><span>DVD</span></div>
+        <div class="shelf-dvd-edge-right"></div>
+        <div class="shelf-dvd-front">
+          <div class="shelf-dvd-lip"><span>CINEMINHA</span></div>
+          <div class="shelf-dvd-art">
+            <img id="${imgId}" class="shelf-dvd-img" src="assets/icon.jpg" alt="${escapeHtml(rev.movie)}" referrerpolicy="no-referrer" />
+            <div class="shelf-dvd-glare"></div>
+            <span class="shelf-status-dot ${statusClass}">${statusSymbol}</span>
+          </div>
+        </div>
+      </div>
+    `;
+
+    item.addEventListener("click", () => {
+      selectShelfDvd(idx);
+    });
+
+    shelfStage.appendChild(item);
+
+    resolveMoviePoster(rev.movie).then(url => {
+      if (url) {
+        const imgEl = document.getElementById(imgId);
+        if (imgEl) imgEl.src = url;
+      }
+    });
+  });
+
+  selectShelfDvd(0);
+}
+
 async function showSummaryView() {
-  setDvd3dMode(false);
+  setDvd3dMode(true);
   document.getElementById("loading-view").classList.add("hidden");
   document.getElementById("game-view").classList.add("hidden");
   document.getElementById("summary-view").classList.remove("hidden");
 
   renderProgressPills();
+  renderSummaryDvdShelf();
 
   const score = state.answers.filter(a => a && a.correct).length;
   const stats = getStats();
