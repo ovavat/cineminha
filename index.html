@@ -22,7 +22,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=3" />
 </head>
 <body>
   <!-- Barra de Navegação Estilo iOS (Frosted Glass) -->
@@ -81,7 +81,7 @@
 
   <div class="app-shell">
     <!-- Barra de Progresso Minimalista Apple-style -->
-    <section class="progress-header" aria-label="Progresso das 5 fases">
+    <section class="progress-header" id="progress-header-section" aria-label="Progresso das 5 fases">
       <div class="progress-top-row">
         <span id="phase-label" class="phase-caption">Fase 1 de 5</span>
         <span id="header-date" class="date-caption">Hoje</span>
@@ -256,6 +256,239 @@
         </div>
       </div>
     </main>
+
+    <!-- Tela da Coleção de Filmes (DVDs 3D Descobertos + Ocultos) -->
+    <main id="pokedex-view" class="view-container hidden" aria-label="Coleção de Filmes">
+      <div class="ios-card pokedex-hero-card">
+        <div class="pokedex-hero-header">
+          <span class="eyebrow-badge pokedex-eyebrow">DVDs Desbloqueados</span>
+          <div class="pokedex-title-row">
+            <h2 class="pokedex-title">Coleção</h2>
+            <div class="pokedex-counter-pill" id="pokedex-count-badge">0 / 0</div>
+          </div>
+        </div>
+        <div class="pokedex-bar-track">
+          <div class="pokedex-bar-fill" id="pokedex-progress-fill" style="width: 0%"></div>
+        </div>
+        <div class="pokedex-filter-row" role="tablist" aria-label="Filtrar coleção">
+          <button class="pokedex-filter-btn active" type="button" data-filter="all">Todos</button>
+          <button class="pokedex-filter-btn" type="button" data-filter="unlocked">Descobertos</button>
+          <button class="pokedex-filter-btn" type="button" data-filter="locked">Ocultos</button>
+        </div>
+      </div>
+
+      <section class="pokedex-grid" id="pokedex-grid" aria-label="Grade de filmes da coleção">
+        <!-- Gerado via JS -->
+      </section>
+    </main>
+
+    <!-- Tela de Perfil & Sincronização em Nuvem (Celular + PC) -->
+    <main id="profile-view" class="view-container hidden" aria-label="Perfil do Jogador">
+      <!-- Card de Login / Criar Conta (exibido quando desconectado) -->
+      <div class="ios-card profile-auth-card" id="profile-auth-card">
+        <div class="profile-auth-hero">
+          <div class="profile-auth-emblem" aria-hidden="true">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"></path>
+            </svg>
+            <span class="profile-auth-emblem-badge">🔥</span>
+          </div>
+          <h2 class="profile-auth-title">Seu Perfil</h2>
+          <p class="profile-auth-sub">Use o mesmo usuário em vários aparelhos para sincronizar sua streak e coleção de DVDs.</p>
+        </div>
+
+        <div class="profile-auth-segmented" role="tablist" aria-label="Modo de acesso">
+          <div class="profile-auth-seg-pill" id="profile-auth-seg-pill"></div>
+          <button class="profile-auth-seg-btn active" type="button" id="auth-tab-login" data-mode="login">Entrar</button>
+          <button class="profile-auth-seg-btn" type="button" id="auth-tab-register" data-mode="register">Criar Conta</button>
+        </div>
+
+        <form class="profile-form" id="profile-auth-form" autocomplete="on">
+          <div class="profile-input-group">
+            <label class="profile-input-label" for="auth-username">Usuário</label>
+            <div class="profile-input-wrap">
+              <span class="profile-input-icon" aria-hidden="true">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="8" r="4"></circle>
+                  <path d="M20 21a8 8 0 0 0-16 0"></path>
+                </svg>
+              </span>
+              <input type="text" id="auth-username" placeholder="ex: Aluadinho" autocomplete="username" required />
+            </div>
+          </div>
+
+          <div class="profile-input-group hidden" id="auth-displayname-group">
+            <label class="profile-input-label" for="auth-displayname">Apelido no Ranking (opcional)</label>
+            <div class="profile-input-wrap">
+              <span class="profile-input-icon" aria-hidden="true">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path>
+                  <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
+                  <path d="M4 22h16"></path>
+                  <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"></path>
+                  <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"></path>
+                  <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"></path>
+                </svg>
+              </span>
+              <input type="text" id="auth-displayname" placeholder="ex: Aluadinho" autocomplete="name" />
+            </div>
+          </div>
+
+          <div class="profile-input-group">
+            <label class="profile-input-label" for="auth-pin">PIN ou Senha</label>
+            <div class="profile-input-wrap">
+              <span class="profile-input-icon" aria-hidden="true">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                  <rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+              </span>
+              <input type="password" id="auth-pin" placeholder="Mínimo 4 caracteres" autocomplete="current-password" required />
+            </div>
+          </div>
+
+          <button class="ios-btn-primary profile-submit-btn" id="btn-auth-submit" type="submit">
+            <span id="btn-auth-submit-text">Entrar na Conta</span>
+          </button>
+        </form>
+      </div>
+
+      <!-- Card de Ranking da Galera (Fica no topo assim que logado) -->
+      <div class="ios-card profile-card" id="profile-leaderboard-card">
+        <div class="pokedex-hero-header">
+          <span class="eyebrow-badge pokedex-eyebrow">Ao Vivo</span>
+          <div class="pokedex-title-row">
+            <h3 class="profile-section-title">Ranking do Cineminha</h3>
+            <div class="profile-connected-pill hidden" id="profile-connected-pill">
+              <span class="profile-connected-dot"></span>
+              <span id="profile-connected-username">@usuario</span>
+            </div>
+          </div>
+        </div>
+        <div class="leaderboard-list" id="leaderboard-list">
+          <p class="leaderboard-empty">Carregando ranking...</p>
+        </div>
+      </div>
+
+      <!-- Rodapé de Desconexão (exibido apenas embaixo quando logado) -->
+      <div class="profile-logout-footer hidden" id="profile-user-card">
+        <button class="ios-btn-secondary profile-logout-only-btn" id="btn-profile-logout" type="button">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+            <polyline points="16 17 21 12 16 7"></polyline>
+            <line x1="21" y1="12" x2="9" y2="12"></line>
+          </svg>
+          <span id="btn-profile-logout-text">Sair da conta</span>
+        </button>
+      </div>
+    </main>
+  </div>
+
+  <!-- Filtro SVG de Refração Óptica (Liquid Glass iOS 26/27) -->
+  <svg width="0" height="0" style="position: absolute; width: 0; height: 0; pointer-events: none;" aria-hidden="true">
+    <defs>
+      <filter id="ios27-liquid-refract" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB">
+        <feTurbulence type="fractalNoise" baseFrequency="0.012 0.025" numOctaves="2" seed="3" result="noise" />
+        <feGaussianBlur in="noise" stdDeviation="2.5" result="smoothNoise" />
+        <feDisplacementMap in="SourceGraphic" in2="smoothNoise" scale="7" xChannelSelector="R" yChannelSelector="G" />
+      </filter>
+    </defs>
+  </svg>
+
+  <!-- Barra de Navegação Flutuante Nativa — Liquid Glass iOS 27 (Somente Ícones + Arrastável) -->
+  <nav class="liquid-glass-nav" id="liquid-glass-nav" aria-label="Navegação principal">
+    <div class="liquid-glass-shell" id="liquid-glass-shell">
+      <div class="liquid-glass-glider" id="liquid-glass-glider"></div>
+
+      <button class="liquid-nav-item active" type="button" id="nav-tab-game" data-tab="game" aria-label="Jogo Diário" aria-current="page">
+        <span class="liquid-nav-icon">
+          <!-- Ícone SF Symbol: calendar (Outline) -->
+          <svg class="sf-icon-outline" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3.5" y="5" width="17" height="15.5" rx="3.2"></rect>
+            <line x1="8" y1="3.2" x2="8" y2="6.5"></line>
+            <line x1="16" y1="3.2" x2="16" y2="6.5"></line>
+            <line x1="3.5" y1="9.8" x2="20.5" y2="9.8"></line>
+            <circle cx="8.5" cy="13.5" r="1" fill="currentColor" stroke="none"></circle>
+            <circle cx="12" cy="13.5" r="1" fill="currentColor" stroke="none"></circle>
+            <circle cx="15.5" cy="13.5" r="1" fill="currentColor" stroke="none"></circle>
+            <circle cx="8.5" cy="17" r="1" fill="currentColor" stroke="none"></circle>
+            <circle cx="12" cy="17" r="1" fill="currentColor" stroke="none"></circle>
+          </svg>
+          <!-- Ícone SF Symbol: calendar (Filled) -->
+          <svg class="sf-icon-filled" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M8 2.4a.95.95 0 0 1 .95.95V4.5h6.1V3.35a.95.95 0 0 1 1.9 0V4.5h.35A3.2 3.2 0 0 1 20.5 7.7v1.35h-17V7.7A3.2 3.2 0 0 1 6.7 4.5h.35V3.35A.95.95 0 0 1 8 2.4z"></path>
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M3.5 10.65h17v6.65a3.2 3.2 0 0 1-3.2 3.2H6.7a3.2 3.2 0 0 1-3.2-3.2v-6.65zm5 4.05a1.15 1.15 0 1 0 0-2.3 1.15 1.15 0 0 0 0 2.3zm3.5 0a1.15 1.15 0 1 0 0-2.3 1.15 1.15 0 0 0 0 2.3zm4.65-1.15a1.15 1.15 0 1 1-2.3 0 1.15 1.15 0 0 1 2.3 0zM8.5 18.15a1.15 1.15 0 1 0 0-2.3 1.15 1.15 0 0 0 0 2.3zm4.65-1.15a1.15 1.15 0 1 1-2.3 0 1.15 1.15 0 0 1 2.3 0z"></path>
+          </svg>
+        </span>
+      </button>
+
+      <button class="liquid-nav-item" type="button" id="nav-tab-pokedex" data-tab="pokedex" aria-label="Coleção">
+        <span class="liquid-nav-icon">
+          <!-- Ícone SF Symbol: opticaldisc / CD (Outline) -->
+          <svg class="sf-icon-outline" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="8.8"></circle>
+            <circle cx="12" cy="12" r="2.5"></circle>
+            <path d="M7.6 9.2a5.2 5.2 0 0 1 1.6-1.6"></path>
+            <path d="M14.8 16.4a5.2 5.2 0 0 0 1.6-1.6"></path>
+          </svg>
+          <!-- Ícone SF Symbol: opticaldisc / CD (Filled) -->
+          <svg class="sf-icon-filled" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2.4a9.6 9.6 0 1 0 0 19.2 9.6 9.6 0 0 0 0-19.2zm-4.95 6.4a.85.85 0 0 1 1.18-.23c.5-.33 1.05-.58 1.63-.73a.85.85 0 1 0-.44-1.64 6.5 6.5 0 0 0-2.14.96.85.85 0 0 0-.23 1.64zm4.95.2a3 3 0 1 0 0 6 3 3 0 0 0 0-6zm0 1.8a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4zm4.95 4.4a.85.85 0 0 1-1.18.23c-.5.33-1.05.58-1.63.73a.85.85 0 1 0 .44 1.64 6.5 6.5 0 0 0 2.14-.96.85.85 0 0 0 .23-1.64z"></path>
+          </svg>
+        </span>
+      </button>
+
+      <button class="liquid-nav-item" type="button" id="nav-tab-profile" data-tab="profile" aria-label="Perfil">
+        <span class="liquid-nav-icon">
+          <!-- Ícone Perfil -->
+          <svg class="sf-icon-outline" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="8.2" r="3.8"></circle>
+            <path d="M5.5 19.5a6.5 6.5 0 0 1 13 0"></path>
+          </svg>
+          <svg class="sf-icon-filled" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+            <circle cx="12" cy="8.2" r="4.1"></circle>
+            <path d="M12 13.8c-3.9 0-7 2.4-7 5.4 0 .44.36.8.8.8h12.4c.44 0 .8-.36.8-.8 0-3-3.1-5.4-7-5.4z"></path>
+          </svg>
+        </span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- Modal: Inspetor 3D do DVD na Pokédex -->
+  <div class="modal-backdrop hidden" id="modal-pokedex-dvd">
+    <div class="ios-sheet pokedex-dvd-sheet" role="dialog" aria-modal="true" aria-labelledby="pokedex-modal-title">
+      <div class="sheet-header">
+        <span class="eyebrow-badge" id="pokedex-modal-num">#001</span>
+        <button class="nav-circle-btn modal-close" data-close="modal-pokedex-dvd" aria-label="Fechar">✕</button>
+      </div>
+      <div class="pokedex-modal-body">
+        <div class="pokedex-inspect-stage" id="pokedex-inspect-stage">
+          <div class="dvd-box-3d" id="pokedex-inspect-box">
+            <div class="dvd-spine">
+              <span class="dvd-spine-logo">DVD</span>
+              <span class="dvd-spine-line"></span>
+            </div>
+            <div class="dvd-edge-right"></div>
+            <div class="dvd-edge-top"></div>
+            <div class="dvd-edge-bottom"></div>
+            <div class="dvd-front">
+              <div class="dvd-plastic-lip">
+                <span>CINEMINHA</span>
+              </div>
+              <div class="dvd-artwork-wrap">
+                <img id="pokedex-inspect-img" class="reveal-poster" src="assets/icon.jpg" alt="Cartaz do filme" referrerpolicy="no-referrer" />
+                <div class="dvd-glare"></div>
+                <div class="dvd-sleeve-border"></div>
+              </div>
+            </div>
+          </div>
+          <div class="dvd-shadow" id="pokedex-inspect-shadow"></div>
+        </div>
+        <h2 class="pokedex-modal-title" id="pokedex-modal-title">Nome do Filme</h2>
+        <p class="pokedex-modal-hint">Arraste com o dedo ou mouse para girar o DVD 3D</p>
+        <div class="pokedex-modal-reviews" id="pokedex-modal-reviews"></div>
+      </div>
+    </div>
   </div>
 
   <!-- Modal Secreto: Resetar Jogo (Ao clicar no ícone do topo, com 2 etapas) -->
@@ -396,8 +629,8 @@
   <!-- Toast de Notificação -->
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="posters-data.js"></script>
-  <script src="reviews-fallback.js"></script>
-  <script src="app.js"></script>
+  <script src="posters-data.js?v=4"></script>
+  <script src="reviews-fallback.js?v=4"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

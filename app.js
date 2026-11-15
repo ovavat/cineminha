@@ -10,9 +10,14 @@ const GVIZ_JSONP_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/
 const TOTAL_PHASES = 5;
 const LAUNCH_DATE_STR = "2026-11-13"; // Dia #1 do Cineminha do Ovavat
 
+const SUPABASE_URL = "https://riyvxpgyouxyljhfqknj.supabase.co";
+const SUPABASE_KEY = "sb_publishable_QkT0GDOivwCnfeBfVQ6nJw_e-CoJ_ic";
+
 const STORAGE_KEYS = {
   STATS: "ovavat_stats_v1",
   DAILY_PROGRESS: "ovavat_daily_v1",
+  POKEDEX: "ovavat_pokedex_v2",
+  PROFILE_SESSION: "ovavat_profile_session_v1",
   SHEET_CACHE: "ovavat_sheet_cache_v1",
   POSTER_CACHE: "ovavat_poster_cache_v9_wikidata_ptbr",
   THEME: "ovavat_theme_v2_light",
@@ -32,6 +37,12 @@ const state = {
   answers: [],         // Array de { selectedIndex, correct, usedHint, movie, author, review }
   phaseHints: {},      // Mapa { [phaseIdx]: { usedHint: true, reviewIdx: 1 } }
   completed: false,
+  dailyStartedAt: 0,   // Timestamp (ms) de quando a 1ª resposta do dia foi dada (garante que o 1º jogo do dia prevaleça)
+  activeTab: "game",
+  pokedexFilter: "all",
+  pokedex: {},         // Mapa { [movieName]: { unlockedAt, usedHint } }
+  profileSession: null, // { username, displayName, pinHash }
+  authMode: "login",   // "login" | "register"
   posterMemoryCache: {},
   posterInflight: {},
   deferredInstallPrompt: null,
@@ -152,6 +163,7 @@ function clamp(val, min, max) {
 function initDvd3dInteractions() {
   const stage = document.getElementById("dvd-stage");
   const shelfStage = document.getElementById("summary-shelf-stage");
+  const pokedexInspectStage = document.getElementById("pokedex-inspect-stage");
 
   let isDragging = false;
   let dragStartX = 0;
@@ -189,7 +201,7 @@ function initDvd3dInteractions() {
     state.gyro.pointerInteracting = false;
   }
 
-  [stage, shelfStage].forEach(el => {
+  [stage, shelfStage, pokedexInspectStage].forEach(el => {
     if (!el) return;
 
     // Impede o navegador de tentar "arrastar o arquivo da imagem" ao clicar e puxar com o mouse
@@ -242,6 +254,8 @@ function startDvd3dAnimationLoop() {
   const boxEl = document.getElementById("dvd-box-3d");
   const shadowEl = document.getElementById("dvd-shadow");
   const shelfStageEl = document.getElementById("summary-shelf-stage");
+  const pokedexBoxEl = document.getElementById("pokedex-inspect-box");
+  const pokedexShadowEl = document.getElementById("pokedex-inspect-shadow");
   const startTime = performance.now();
 
   function tick(now) {
@@ -268,6 +282,13 @@ function startDvd3dAnimationLoop() {
       boxEl.style.setProperty("--ry", `${ry.toFixed(2)}deg`);
       boxEl.style.setProperty("--glare-x", `${glareX.toFixed(1)}%`);
       boxEl.style.setProperty("--glare-y", `${glareY.toFixed(1)}%`);
+    }
+
+    if (pokedexBoxEl) {
+      pokedexBoxEl.style.setProperty("--rx", `${rx.toFixed(2)}deg`);
+      pokedexBoxEl.style.setProperty("--ry", `${ry.toFixed(2)}deg`);
+      pokedexBoxEl.style.setProperty("--glare-x", `${glareX.toFixed(1)}%`);
+      pokedexBoxEl.style.setProperty("--glare-y", `${glareY.toFixed(1)}%`);
     }
 
     if (shelfStageEl) {
@@ -305,6 +326,10 @@ function startDvd3dAnimationLoop() {
     if (shadowEl) {
       const shadowX = clamp(-ry * 0.45, -12, 12);
       shadowEl.style.setProperty("--shadow-x", `${shadowX.toFixed(1)}px`);
+    }
+    if (pokedexShadowEl) {
+      const shadowX = clamp(-ry * 0.45, -12, 12);
+      pokedexShadowEl.style.setProperty("--shadow-x", `${shadowX.toFixed(1)}px`);
     }
 
     state.gyro.rafId = requestAnimationFrame(tick);
@@ -1399,7 +1424,31 @@ function saveStats(stats) {
 
 function recordDailyCompletion(score) {
   const stats = getStats();
+  if (!stats.history || typeof stats.history !== "object") {
+    stats.history = {};
+  }
+  const startedAt = state.dailyStartedAt || Date.now();
+  const unlockedToday = state.answers
+    .filter(a => a && a.correct && a.movie)
+    .map(a => a.movie);
+
+  // Se já existe um jogo registrado hoje em stats.history com startedAt menor, preserva o primeiro!
+  const existingEntry = stats.history[state.todayStr];
+  const existingTs =
+    existingEntry && typeof existingEntry === "object"
+      ? Number(existingEntry.startedAt) || Infinity
+      : Infinity;
+
+  if (!existingEntry || startedAt <= existingTs) {
+    stats.history[state.todayStr] = {
+      score,
+      startedAt,
+      movies: unlockedToday
+    };
+  }
+
   if (stats.lastCompletedDate === state.todayStr) {
+    saveStats(stats);
     return stats;
   }
 
@@ -1448,10 +1497,94 @@ function saveDailyProgress() {
         currentPhase: state.currentPhase,
         answers: state.answers,
         phaseHints: state.phaseHints,
-        completed: state.completed
+        completed: state.completed,
+        startedAt: state.dailyStartedAt || 0
       })
     );
   } catch (_) {}
+}
+
+function loadPokedex() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.POKEDEX);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") return parsed;
+    }
+  } catch (_) {}
+  return {};
+}
+
+function savePokedex() {
+  try {
+    localStorage.setItem(STORAGE_KEYS.POKEDEX, JSON.stringify(state.pokedex));
+  } catch (_) {}
+}
+
+function unlockMovieInPokedex(movieName, usedHint = false, dateStr = state.todayStr) {
+  if (!movieName) return;
+  const existing = state.pokedex[movieName];
+  if (!existing) {
+    state.pokedex[movieName] = {
+      unlockedAt: dateStr,
+      usedHint: Boolean(usedHint)
+    };
+  } else if (existing.usedHint && !usedHint) {
+    existing.usedHint = false;
+  }
+  savePokedex();
+}
+
+function syncPokedexFromProgress() {
+  state.pokedex = loadPokedex();
+  let changed = false;
+
+  // Desbloqueia apenas os filmes com resposta exata confirmada em ovavat_daily_v1 (a partir de hoje / último jogo salvo no aparelho),
+  // sem tentar adivinhar/reconstruir dias passados onde a lista de filmes não estava salva.
+  try {
+    const rawDaily = localStorage.getItem(STORAGE_KEYS.DAILY_PROGRESS);
+    if (rawDaily) {
+      const dailyData = JSON.parse(rawDaily);
+      const dailyDate = dailyData?.date || state.todayStr;
+      const ansList = dailyData?.answers || [];
+      ansList.forEach((ans, idx) => {
+        if (!ans || !ans.correct) return;
+        const mv =
+          ans.movie ||
+          (dailyDate === state.todayStr ? state.dailyPhases[idx]?.reviewObj?.movie : null);
+        if (mv && !state.pokedex[mv]) {
+          state.pokedex[mv] = {
+            unlockedAt: dailyDate,
+            usedHint: Boolean(ans.usedHint)
+          };
+          changed = true;
+        }
+      });
+
+      // Registra também a nota confirmada desse dia no histórico por data (preservando o primeiro jogado)
+      if (dailyData?.completed && ansList.length > 0) {
+        const stats = getStats();
+        if (!stats.history || typeof stats.history !== "object") {
+          stats.history = {};
+        }
+        const dayScore = ansList.filter(a => a && a.correct).length;
+        const dayMovies = ansList.filter(a => a && a.correct && a.movie).map(a => a.movie);
+        const dayTs = Number(dailyData.startedAt) || Date.now();
+        if (!stats.history[dailyDate]) {
+          stats.history[dailyDate] = {
+            score: dayScore,
+            startedAt: dayTs,
+            movies: dayMovies
+          };
+          saveStats(stats);
+        }
+      }
+    }
+  } catch (_) {}
+
+  if (changed) {
+    savePokedex();
+  }
 }
 
 function resetDailyGameForTesting() {
@@ -1460,6 +1593,7 @@ function resetDailyGameForTesting() {
   state.answers = [];
   state.phaseHints = {};
   state.completed = false;
+  state.dailyStartedAt = 0;
   setDvd3dMode(false);
 
   document.getElementById("summary-view").classList.add("hidden");
@@ -1753,6 +1887,10 @@ async function showRevealCard(phaseData, isCorrect, usedHint = false) {
 function handleSelectOption(selectedIndex) {
   if (state.answers[state.currentPhase]) return;
 
+  if (!state.dailyStartedAt || state.answers.length === 0) {
+    state.dailyStartedAt = Date.now();
+  }
+
   const phaseData = state.dailyPhases[state.currentPhase];
   const activeReviewObj = getActiveReviewForPhase(state.currentPhase) || phaseData.reviewObj;
   const isCorrect = selectedIndex === phaseData.correctIndex;
@@ -1767,6 +1905,10 @@ function handleSelectOption(selectedIndex) {
     review: activeReviewObj.review
   };
 
+  if (isCorrect) {
+    unlockMovieInPokedex(activeReviewObj.movie, usedHint, state.todayStr);
+  }
+
   if (state.answers.length === TOTAL_PHASES) {
     const totalScore = state.answers.filter(a => a && a.correct).length;
     recordDailyCompletion(totalScore);
@@ -1775,6 +1917,7 @@ function handleSelectOption(selectedIndex) {
 
   saveDailyProgress();
   renderCurrentPhase();
+  pushSaveToCloud();
 }
 
 function handleNextPhase() {
@@ -1783,6 +1926,7 @@ function handleNextPhase() {
     state.currentPhase += 1;
     saveDailyProgress();
     renderCurrentPhase();
+    pushSaveToCloud();
     window.scrollTo({ top: 0, behavior: "smooth" });
   } else {
     state.completed = true;
@@ -1790,6 +1934,7 @@ function handleNextPhase() {
     recordDailyCompletion(totalScore);
     saveDailyProgress();
     updateHeaderStats();
+    pushSaveToCloud();
     showSummaryView();
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -1801,12 +1946,12 @@ function handleNextPhase() {
 
 function getScoreSubtitle(score) {
   switch (score) {
-    case 5: return "Gabaritou! Você conhece cada pérola das quintas-feiras! 🏆";
-    case 4: return "Quase perfeito! Memória afiada nas reviews da galera! 🍿";
-    case 3: return "Bom desempenho! Passou de ano no Cineminha! 🎬";
-    case 2: return "Deu pro gasto, mas faltou prestar atenção nos créditos! 👀";
-    case 1: return "Pelo menos uma salvou a honra de hoje! 😅";
-    default: return "Dormiu durante a sessão de quinta-feira? 💤";
+    case 5: return "Gabaritou! Conhece cada pérola de quinta.";
+    case 4: return "Quase perfeito! Memória afiada nas reviews.";
+    case 3: return "Mandou bem! Passou de ano no Cineminha.";
+    case 2: return "Deu pro gasto, mas faltou atenção.";
+    case 1: return "Pelo menos uma salvou a honra de hoje.";
+    default: return "Dormiu durante a sessão de quinta-feira?";
   }
 }
 
@@ -2018,6 +2163,778 @@ function showToast(msg) {
 }
 
 // ============================================================================
+// 11B. POKÉDEX DE FILMES (ESTILO POKÉMON GO COM DVDS 3D) & LIQUID GLASS NAV
+// ============================================================================
+
+function switchMainTab(tabName) {
+  state.activeTab = tabName;
+  const glider = document.getElementById("liquid-glass-glider");
+  const btnGame = document.getElementById("nav-tab-game");
+  const btnPokedex = document.getElementById("nav-tab-pokedex");
+  const btnProfile = document.getElementById("nav-tab-profile");
+  const progressSection = document.getElementById("progress-header-section");
+  const gameView = document.getElementById("game-view");
+  const summaryView = document.getElementById("summary-view");
+  const pokedexView = document.getElementById("pokedex-view");
+  const profileView = document.getElementById("profile-view");
+
+  if (glider) {
+    // Efeito elástico rápido de gota líquida iOS 27 ao clicar ou soltar
+    glider.classList.remove("is-dragging");
+    glider.style.setProperty("--glider-sx", "1.14");
+    glider.style.setProperty("--glider-sy", "0.91");
+    clearTimeout(window.__gliderTimer);
+    window.__gliderTimer = setTimeout(() => {
+      glider.style.setProperty("--glider-sx", "1");
+      glider.style.setProperty("--glider-sy", "1");
+    }, 180);
+  }
+
+  btnGame?.classList.remove("active");
+  btnPokedex?.classList.remove("active");
+  btnProfile?.classList.remove("active");
+
+  if (tabName === "pokedex") {
+    if (glider) glider.style.setProperty("--glider-idx", "1");
+    btnPokedex?.classList.add("active");
+
+    progressSection?.classList.add("hidden");
+    gameView?.classList.add("hidden");
+    summaryView?.classList.add("hidden");
+    profileView?.classList.add("hidden");
+    pokedexView?.classList.remove("hidden");
+
+    renderPokedexView();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } else if (tabName === "profile") {
+    if (glider) glider.style.setProperty("--glider-idx", "2");
+    btnProfile?.classList.add("active");
+
+    progressSection?.classList.add("hidden");
+    gameView?.classList.add("hidden");
+    summaryView?.classList.add("hidden");
+    pokedexView?.classList.add("hidden");
+    profileView?.classList.remove("hidden");
+
+    renderProfileView();
+    loadLeaderboardFromCloud();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } else {
+    if (glider) glider.style.setProperty("--glider-idx", "0");
+    btnGame?.classList.add("active");
+
+    pokedexView?.classList.add("hidden");
+    profileView?.classList.add("hidden");
+    progressSection?.classList.remove("hidden");
+
+    if (state.completed) {
+      gameView?.classList.add("hidden");
+      summaryView?.classList.remove("hidden");
+      setDvd3dMode(true);
+    } else {
+      summaryView?.classList.add("hidden");
+      gameView?.classList.remove("hidden");
+      const hasAnswerInCurrent = Boolean(state.answers[state.currentPhase]);
+      setDvd3dMode(hasAnswerInCurrent);
+    }
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+}
+
+function renderPokedexView() {
+  const grid = document.getElementById("pokedex-grid");
+  const countBadge = document.getElementById("pokedex-count-badge");
+  const progressFill = document.getElementById("pokedex-progress-fill");
+  if (!grid) return;
+
+  const totalMovies = state.allMovies.length;
+  const unlockedCount = state.allMovies.filter(m => Boolean(state.pokedex[m])).length;
+  const pct = totalMovies > 0 ? Math.round((unlockedCount / totalMovies) * 100) : 0;
+
+  if (countBadge) {
+    countBadge.textContent = `${unlockedCount} / ${totalMovies}`;
+  }
+  if (progressFill) {
+    progressFill.style.width = `${pct}%`;
+  }
+
+  grid.innerHTML = "";
+
+  // Coloca os filmes já acertados (Descobertos em 3D) primeiro no topo da grade, mantendo o número #XXX original de cada um!
+  const entries = state.allMovies.map((movieName, idx) => ({
+    movieName,
+    idx,
+    isUnlocked: Boolean(state.pokedex[movieName])
+  }));
+
+  entries.sort((a, b) => {
+    if (a.isUnlocked !== b.isUnlocked) return a.isUnlocked ? -1 : 1;
+    return a.idx - b.idx;
+  });
+
+  entries.forEach(({ movieName, idx, isUnlocked }) => {
+    if (state.pokedexFilter === "unlocked" && !isUnlocked) return;
+    if (state.pokedexFilter === "locked" && isUnlocked) return;
+
+    const numStr = `#${String(idx + 1).padStart(3, "0")}`;
+    const slot = document.createElement("div");
+    slot.className = `pokedex-slot ${isUnlocked ? "unlocked" : "locked"}`;
+
+    if (isUnlocked) {
+      const imgId = `pokedex-img-${idx}`;
+      slot.innerHTML = `
+        <span class="pokedex-num-badge">${numStr}</span>
+        <div class="pokedex-mini-stage">
+          <div class="pokedex-mini-dvd">
+            <div class="pokedex-mini-spine"><span>DVD</span></div>
+            <div class="pokedex-mini-front">
+              <div class="pokedex-mini-lip"><span>CINEMINHA</span></div>
+              <div class="pokedex-mini-art">
+                <img id="${imgId}" class="pokedex-mini-img" src="assets/icon.jpg" alt="${escapeHtml(movieName)}" referrerpolicy="no-referrer" />
+                <div class="pokedex-mini-glare"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <span class="pokedex-slot-name">${escapeHtml(movieName)}</span>
+      `;
+
+      slot.addEventListener("click", () => {
+        openPokedexDvdModal(movieName, numStr);
+      });
+
+      resolveMoviePoster(movieName).then(url => {
+        if (url) {
+          const imgEl = document.getElementById(imgId);
+          if (imgEl) imgEl.src = url;
+        }
+      });
+    } else {
+      // Ainda não descoberto: esconde o pôster e o nome do filme (estilo Pokémon GO)
+      slot.innerHTML = `
+        <span class="pokedex-num-badge">${numStr}</span>
+        <div class="pokedex-mystery-box" aria-label="Filme ainda não descoberto">
+          <span class="pokedex-mystery-icon">?</span>
+        </div>
+        <span class="pokedex-slot-name">???</span>
+      `;
+    }
+
+    grid.appendChild(slot);
+  });
+}
+
+function openPokedexDvdModal(movieName, numStr) {
+  const modal = document.getElementById("modal-pokedex-dvd");
+  const numEl = document.getElementById("pokedex-modal-num");
+  const titleEl = document.getElementById("pokedex-modal-title");
+  const imgEl = document.getElementById("pokedex-inspect-img");
+  const reviewsEl = document.getElementById("pokedex-modal-reviews");
+  if (!modal) return;
+
+  if (numEl) numEl.textContent = numStr;
+  if (titleEl) titleEl.textContent = movieName;
+  if (imgEl) {
+    imgEl.src = "assets/icon.jpg";
+    resolveMoviePoster(movieName).then(url => {
+      if (url) imgEl.src = url;
+    });
+  }
+
+  if (reviewsEl) {
+    reviewsEl.innerHTML = "";
+    const movieReviews = state.allReviews.filter(r => r.movie === movieName);
+    movieReviews.forEach(rev => {
+      const chip = document.createElement("div");
+      chip.className = "pokedex-review-chip";
+      chip.innerHTML = `
+        <span class="pokedex-review-author">por ${escapeHtml(rev.author)}</span>
+        <p class="pokedex-review-text">“${escapeHtml(rev.review)}”</p>
+      `;
+      reviewsEl.appendChild(chip);
+    });
+  }
+
+  setDvd3dMode(true);
+  modal.classList.remove("hidden");
+}
+
+// ============================================================================
+// 11C. PERFIL DO JOGADOR & SINCRONIZAÇÃO EM NUVEM (SUPABASE REST API)
+// ============================================================================
+
+function loadProfileSession() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.PROFILE_SESSION);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.username && parsed.pinHash) {
+        return parsed;
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
+function saveProfileSession(sessionObj) {
+  state.profileSession = sessionObj;
+  try {
+    if (sessionObj) {
+      localStorage.setItem(STORAGE_KEYS.PROFILE_SESSION, JSON.stringify(sessionObj));
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.PROFILE_SESSION);
+    }
+  } catch (_) {}
+}
+
+function normalizeUsername(raw) {
+  return String(raw || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9_.-]/g, "")
+    .trim();
+}
+
+async function hashPin(pin, username) {
+  const input = `ovavat_v1:${normalizeUsername(username)}:${String(pin || "").trim()}`;
+  try {
+    if (window.crypto && window.crypto.subtle) {
+      const buf = new TextEncoder().encode(input);
+      const digest = await window.crypto.subtle.digest("SHA-256", buf);
+      return Array.from(new Uint8Array(digest))
+        .map(b => b.toString(16).padStart(2, "0"))
+        .join("");
+    }
+  } catch (_) {}
+  // Fallback determinístico caso rode em contexto sem WebCrypto
+  let h1 = 0xdeadbeef ^ input.length;
+  let h2 = 0x41c6ce57 ^ input.length;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (h2 >>> 0).toString(16).padStart(8, "0") + (h1 >>> 0).toString(16).padStart(8, "0");
+}
+
+function getSupabaseHeaders(extra = {}) {
+  return {
+    apikey: SUPABASE_KEY,
+    Authorization: `Bearer ${SUPABASE_KEY}`,
+    "Content-Type": "application/json",
+    ...extra
+  };
+}
+
+function normalizeHistoryEntry(rawEntry) {
+  if (rawEntry && typeof rawEntry === "object") {
+    return {
+      score: Math.min(5, Math.max(0, Number(rawEntry.score) || 0)),
+      startedAt: Number(rawEntry.startedAt) || Infinity,
+      movies: Array.isArray(rawEntry.movies) ? rawEntry.movies : null
+    };
+  }
+  return {
+    score: Math.min(5, Math.max(0, Number(rawEntry) || 0)),
+    startedAt: Infinity,
+    movies: null
+  };
+}
+
+function mergeCloudAndLocalData(cloudRow) {
+  if (!cloudRow) return;
+
+  // 1. Verifica o progresso de hoje primeiro (se houver 2 jogos separados hoje, prevalece APENAS o 1º que foi jogado!)
+  const cloudDaily = (cloudRow.daily_progress && typeof cloudRow.daily_progress === "object")
+    ? cloudRow.daily_progress
+    : null;
+
+  let forbiddenTodayMovies = new Set();
+
+  if (cloudDaily && cloudDaily.date === state.todayStr) {
+    const cloudAns = Array.isArray(cloudDaily.answers) ? cloudDaily.answers : [];
+    const localAns = Array.isArray(state.answers) ? state.answers : [];
+    const cloudAnsCount = cloudAns.length;
+    const localAnsCount = localAns.length;
+    const cloudTs = Number(cloudDaily.startedAt) || Infinity;
+    const localTs = Number(state.dailyStartedAt) || Infinity;
+
+    let useCloudToday = false;
+
+    if (localAnsCount === 0 && cloudAnsCount > 0) {
+      useCloudToday = true;
+    } else if (localAnsCount > 0 && cloudAnsCount > 0) {
+      if (cloudTs === localTs) {
+        // Mesma sessão sincronizada entre aparelhos: avança para a fase mais adiantada
+        if (cloudAnsCount > localAnsCount || (cloudDaily.completed && !state.completed)) {
+          useCloudToday = true;
+        }
+      } else {
+        // Duas partidas diferentes jogadas no mesmo dia em aparelhos distintos: vale APENAS a que foi jogada primeiro!
+        useCloudToday = cloudTs <= localTs;
+      }
+    }
+
+    const winningAns = useCloudToday ? cloudAns : localAns;
+    const losingAns = useCloudToday ? localAns : cloudAns;
+    const winningCorrectSet = new Set(
+      winningAns.filter(a => a && a.correct && a.movie).map(a => a.movie)
+    );
+    losingAns.forEach(a => {
+      if (a && a.correct && a.movie && !winningCorrectSet.has(a.movie)) {
+        forbiddenTodayMovies.add(a.movie);
+      }
+    });
+
+    if (useCloudToday) {
+      state.answers = cloudAns;
+      state.currentPhase = cloudDaily.currentPhase || 0;
+      state.phaseHints = cloudDaily.phaseHints || {};
+      state.completed = Boolean(cloudDaily.completed);
+      state.dailyStartedAt = Number(cloudDaily.startedAt) || state.dailyStartedAt || Date.now();
+      saveDailyProgress();
+    }
+  }
+
+  // 2. Mescla o histórico por data (se o mesmo dia existir nos 2 aparelhos, vale SEMPRE o que foi jogado primeiro!)
+  const localStats = getStats();
+  const cloudStats = (cloudRow.stats && typeof cloudRow.stats === "object") ? cloudRow.stats : {};
+
+  const localHist = (localStats.history && typeof localStats.history === "object") ? localStats.history : {};
+  const cloudHist = (cloudStats.history && typeof cloudStats.history === "object") ? cloudStats.history : {};
+  const allHistDates = new Set([...Object.keys(cloudHist), ...Object.keys(localHist)]);
+  const mergedHistory = {};
+  const forbiddenPastMovies = new Set();
+
+  for (const dt of allHistDates) {
+    const hasCloud = Object.prototype.hasOwnProperty.call(cloudHist, dt);
+    const hasLocal = Object.prototype.hasOwnProperty.call(localHist, dt);
+    if (hasCloud && !hasLocal) {
+      mergedHistory[dt] = normalizeHistoryEntry(cloudHist[dt]);
+    } else if (hasLocal && !hasCloud) {
+      mergedHistory[dt] = normalizeHistoryEntry(localHist[dt]);
+    } else {
+      const cEntry = normalizeHistoryEntry(cloudHist[dt]);
+      const lEntry = normalizeHistoryEntry(localHist[dt]);
+      const cloudWon = cEntry.startedAt <= lEntry.startedAt;
+      const winner = cloudWon ? cEntry : lEntry;
+      const loser = cloudWon ? lEntry : cEntry;
+      mergedHistory[dt] = winner;
+
+      if (Array.isArray(winner.movies) && Array.isArray(loser.movies)) {
+        const winSet = new Set(winner.movies);
+        loser.movies.forEach(mv => {
+          if (!winSet.has(mv)) forbiddenPastMovies.add(mv);
+        });
+      }
+    }
+  }
+
+  // 3. Mescla a Coleção de DVDs (removendo eventuais filmes que só tenham sido acertados numa 2ª tentativa do mesmo dia)
+  const cloudPokedex = (cloudRow.pokedex && typeof cloudRow.pokedex === "object") ? cloudRow.pokedex : {};
+  for (const [mv, info] of Object.entries(cloudPokedex)) {
+    if (forbiddenTodayMovies.has(mv) || forbiddenPastMovies.has(mv)) continue;
+    if (!state.pokedex[mv]) {
+      state.pokedex[mv] = info;
+    } else if (state.pokedex[mv].usedHint && info && !info.usedHint) {
+      state.pokedex[mv].usedHint = false;
+    }
+  }
+  for (const mv of [...forbiddenTodayMovies, ...forbiddenPastMovies]) {
+    delete state.pokedex[mv];
+  }
+  savePokedex();
+
+  // 4. Recalcula as estatísticas gerais com base no histórico vencedor de cada dia
+  const histDates = Object.keys(mergedHistory).sort();
+  const histPlayed = histDates.length;
+  const histTotalCorrect = histDates.reduce((acc, dt) => acc + (mergedHistory[dt].score || 0), 0);
+
+  let histStreak = 0;
+  let histMaxStreak = 0;
+  const histDist = [0, 0, 0, 0, 0, 0];
+  let prevDate = null;
+  for (const dt of histDates) {
+    const sc = Math.min(5, Math.max(0, mergedHistory[dt].score || 0));
+    histDist[sc] = (histDist[sc] || 0) + 1;
+    if (prevDate && getYesterdayIso(dt) === prevDate) {
+      histStreak += 1;
+    } else {
+      histStreak = 1;
+    }
+    if (histStreak > histMaxStreak) histMaxStreak = histStreak;
+    prevDate = dt;
+  }
+
+  const mergedDist = [0, 0, 0, 0, 0, 0];
+  for (let i = 0; i < 6; i++) {
+    mergedDist[i] = histPlayed > 0
+      ? Math.max(histDist[i], (cloudStats.distribution && cloudStats.distribution[i]) || 0)
+      : Math.max(
+          (localStats.distribution && localStats.distribution[i]) || 0,
+          (cloudStats.distribution && cloudStats.distribution[i]) || 0
+        );
+  }
+
+  const localLast = localStats.lastCompletedDate || "";
+  const cloudLast = cloudStats.lastCompletedDate || "";
+  const histLast = histDates[histDates.length - 1] || "";
+  const bestLastDate = [localLast, cloudLast, histLast].sort().pop() || null;
+
+  let bestStreak = histStreak;
+  if (cloudLast >= localLast && (cloudStats.currentStreak || 0) > bestStreak) {
+    bestStreak = cloudStats.currentStreak || 0;
+  }
+  if (localLast >= cloudLast && (localStats.currentStreak || 0) > bestStreak) {
+    bestStreak = localStats.currentStreak || 0;
+  }
+  if (localLast && cloudLast && localLast !== cloudLast) {
+    if (getYesterdayIso(localLast) === cloudLast) {
+      bestStreak = Math.max(bestStreak, (cloudStats.currentStreak || 1) + 1);
+    } else if (getYesterdayIso(cloudLast) === localLast) {
+      bestStreak = Math.max(bestStreak, (localStats.currentStreak || 1) + 1);
+    }
+  }
+
+  const mergedStats = {
+    played: histPlayed > 0
+      ? Math.max(histPlayed, cloudStats.played || 0)
+      : Math.max(localStats.played || 0, cloudStats.played || 0),
+    totalCorrect: histPlayed > 0
+      ? Math.max(histTotalCorrect, Object.keys(state.pokedex).length)
+      : Math.max(
+          localStats.totalCorrect || 0,
+          cloudStats.totalCorrect || 0,
+          Object.keys(state.pokedex).length
+        ),
+    currentStreak: bestStreak,
+    maxStreak: Math.max(histMaxStreak, localStats.maxStreak || 0, cloudStats.maxStreak || 0, bestStreak),
+    lastCompletedDate: bestLastDate,
+    distribution: mergedDist,
+    history: mergedHistory
+  };
+  saveStats(mergedStats);
+
+  syncPokedexFromProgress();
+  updateHeaderStats();
+}
+
+async function pushSaveToCloud() {
+  if (!state.profileSession || !state.profileSession.username) return false;
+  const { username, displayName, pinHash } = state.profileSession;
+
+  const payload = {
+    stats: getStats(),
+    daily_progress: {
+      date: state.todayStr,
+      currentPhase: state.currentPhase,
+      answers: state.answers,
+      phaseHints: state.phaseHints,
+      completed: state.completed,
+      startedAt: state.dailyStartedAt || 0
+    },
+    pokedex: state.pokedex,
+    updated_at: new Date().toISOString()
+  };
+  if (displayName) {
+    payload.display_name = displayName;
+  }
+
+  try {
+    const url = `${SUPABASE_URL}/rest/v1/profiles?username=eq.${encodeURIComponent(username)}&pin_hash=eq.${encodeURIComponent(pinHash)}`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: getSupabaseHeaders({ Prefer: "return=minimal" }),
+      body: JSON.stringify(payload)
+    });
+    return res.ok;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function pullAndMergeCloudSave(showFeedback = false) {
+  if (!state.profileSession || !state.profileSession.username) return false;
+  const { username, pinHash } = state.profileSession;
+
+  try {
+    const safeCols = "username,display_name,stats,daily_progress,pokedex,updated_at";
+    const url = `${SUPABASE_URL}/rest/v1/profiles?username=eq.${encodeURIComponent(username)}&pin_hash=eq.${encodeURIComponent(pinHash)}&select=${safeCols}`;
+    const res = await fetch(url, {
+      method: "GET",
+      headers: getSupabaseHeaders()
+    });
+    if (!res.ok) return false;
+    const rows = await res.json();
+    const row = rows && rows[0];
+    if (!row) {
+      return false;
+    }
+
+    const wasCompleted = state.completed;
+    const prevAnsCount = state.answers.length;
+
+    state.profileSession.displayName = row.display_name || state.profileSession.displayName;
+    saveProfileSession(state.profileSession);
+
+    mergeCloudAndLocalData(row);
+    await pushSaveToCloud();
+
+    // Se o jogo de hoje avançou ou concluiu no outro aparelho, atualiza a tela
+    if (state.activeTab === "game") {
+      if (state.completed && !wasCompleted) {
+        showSummaryView();
+      } else if (state.answers.length !== prevAnsCount) {
+        renderCurrentPhase();
+      }
+    } else if (state.activeTab === "pokedex") {
+      renderPokedexView();
+    } else if (state.activeTab === "profile") {
+      renderProfileView();
+    }
+
+    if (showFeedback) {
+      showToast("Save sincronizado com a nuvem! ☁️");
+    }
+    return true;
+  } catch (_) {
+    if (showFeedback) {
+      showToast("Erro ao conectar na nuvem.");
+    }
+    return false;
+  }
+}
+
+function setAuthMode(mode) {
+  state.authMode = mode === "register" ? "register" : "login";
+  const btnLogin = document.getElementById("auth-tab-login");
+  const btnRegister = document.getElementById("auth-tab-register");
+  const segPill = document.getElementById("profile-auth-seg-pill");
+  const displayGroup = document.getElementById("auth-displayname-group");
+  const submitText = document.getElementById("btn-auth-submit-text");
+
+  if (state.authMode === "register") {
+    btnLogin?.classList.remove("active");
+    btnRegister?.classList.add("active");
+    segPill?.style.setProperty("--auth-seg-idx", "1");
+    displayGroup?.classList.remove("hidden");
+    if (submitText) submitText.textContent = "Criar Conta";
+  } else {
+    btnRegister?.classList.remove("active");
+    btnLogin?.classList.add("active");
+    segPill?.style.setProperty("--auth-seg-idx", "0");
+    displayGroup?.classList.add("hidden");
+    if (submitText) submitText.textContent = "Entrar na Conta";
+  }
+}
+
+async function handleProfileAuthSubmit(e) {
+  e.preventDefault();
+  const rawUser = document.getElementById("auth-username")?.value || "";
+  const rawDisplay = document.getElementById("auth-displayname")?.value || "";
+  const rawPin = document.getElementById("auth-pin")?.value || "";
+  const submitBtn = document.getElementById("btn-auth-submit");
+
+  const username = normalizeUsername(rawUser);
+  if (username.length < 2) {
+    showToast("Digite um usuário válido (mín. 2 letras).");
+    return;
+  }
+  if (rawPin.trim().length < 4) {
+    showToast("O PIN/Senha deve ter pelo menos 4 caracteres.");
+    return;
+  }
+
+  const pinHash = await hashPin(rawPin, username);
+  if (submitBtn) submitBtn.disabled = true;
+
+  try {
+    // Verifica se o usuário já existe no Supabase (sem selecionar pin_hash)
+    const checkUrl = `${SUPABASE_URL}/rest/v1/profiles?username=eq.${encodeURIComponent(username)}&select=username,display_name`;
+    const checkRes = await fetch(checkUrl, {
+      method: "GET",
+      headers: getSupabaseHeaders()
+    });
+    if (!checkRes.ok) {
+      showToast("Erro ao conectar com o servidor.");
+      if (submitBtn) submitBtn.disabled = false;
+      return;
+    }
+
+    const existingRows = await checkRes.json();
+    const existing = existingRows && existingRows[0];
+
+    if (state.authMode === "register") {
+      if (existing) {
+        showToast("Esse usuário já existe! Mude para 'Entrar'.");
+        if (submitBtn) submitBtn.disabled = false;
+        return;
+      }
+
+      const displayName = rawDisplay.trim() || rawUser.trim() || username;
+      const newRow = {
+        username,
+        display_name: displayName,
+        pin_hash: pinHash,
+        stats: getStats(),
+        daily_progress: {
+          date: state.todayStr,
+          currentPhase: state.currentPhase,
+          answers: state.answers,
+          phaseHints: state.phaseHints,
+          completed: state.completed,
+          startedAt: state.dailyStartedAt || 0
+        },
+        pokedex: state.pokedex,
+        updated_at: new Date().toISOString()
+      };
+
+      const createRes = await fetch(`${SUPABASE_URL}/rest/v1/profiles`, {
+        method: "POST",
+        headers: getSupabaseHeaders({ Prefer: "return=minimal" }),
+        body: JSON.stringify(newRow)
+      });
+
+      if (!createRes.ok) {
+        showToast("Não foi possível criar a conta.");
+        if (submitBtn) submitBtn.disabled = false;
+        return;
+      }
+
+      saveProfileSession({ username, displayName, pinHash });
+      showToast(`Conta @${username} criada e sincronizada! ☁️`);
+    } else {
+      if (!existing) {
+        showToast("Usuário não encontrado! Clique em 'Criar Conta'.");
+        if (submitBtn) submitBtn.disabled = false;
+        return;
+      }
+
+      const safeCols = "username,display_name,stats,daily_progress,pokedex,updated_at";
+      const authUrl = `${SUPABASE_URL}/rest/v1/profiles?username=eq.${encodeURIComponent(username)}&pin_hash=eq.${encodeURIComponent(pinHash)}&select=${safeCols}`;
+      const authRes = await fetch(authUrl, {
+        method: "GET",
+        headers: getSupabaseHeaders()
+      });
+      const authRows = authRes.ok ? await authRes.json() : [];
+      const authedRow = authRows && authRows[0];
+
+      if (!authedRow) {
+        showToast("PIN ou senha incorretos!");
+        if (submitBtn) submitBtn.disabled = false;
+        return;
+      }
+
+      const displayName = authedRow.display_name || username;
+      saveProfileSession({ username, displayName, pinHash });
+      mergeCloudAndLocalData(authedRow);
+      await pushSaveToCloud();
+      showToast(`Bem-vindo de volta, ${displayName}! ☁️`);
+    }
+
+    renderProfileView();
+    loadLeaderboardFromCloud();
+  } catch (_) {
+    showToast("Erro de conexão ao autenticar.");
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+}
+
+function renderProfileView() {
+  const authCard = document.getElementById("profile-auth-card");
+  const userCard = document.getElementById("profile-user-card");
+  const connectedPill = document.getElementById("profile-connected-pill");
+  const connectedUsernameEl = document.getElementById("profile-connected-username");
+  const logoutTextEl = document.getElementById("btn-profile-logout-text");
+  if (!authCard || !userCard) return;
+
+  if (!state.profileSession || !state.profileSession.username) {
+    authCard.classList.remove("hidden");
+    userCard.classList.add("hidden");
+    connectedPill?.classList.add("hidden");
+    return;
+  }
+
+  authCard.classList.add("hidden");
+  userCard.classList.remove("hidden");
+  connectedPill?.classList.remove("hidden");
+
+  const { username } = state.profileSession;
+  if (connectedUsernameEl) {
+    connectedUsernameEl.textContent = `@${username}`;
+  }
+  if (logoutTextEl) {
+    logoutTextEl.textContent = `Desconectar (@${username})`;
+  }
+}
+
+async function loadLeaderboardFromCloud() {
+  const listEl = document.getElementById("leaderboard-list");
+  if (!listEl) return;
+
+  try {
+    const url = `${SUPABASE_URL}/rest/v1/profiles?select=username,display_name,stats,pokedex,updated_at&limit=50`;
+    const res = await fetch(url, {
+      method: "GET",
+      headers: getSupabaseHeaders()
+    });
+    if (!res.ok) return;
+    const rows = await res.json();
+    if (!Array.isArray(rows) || rows.length === 0) {
+      listEl.innerHTML = `<p class="leaderboard-empty">Crie sua conta acima para inaugurar o ranking da galera!</p>`;
+      return;
+    }
+
+    const parsed = rows.map(r => {
+      const st = r.stats || {};
+      const pk = r.pokedex || {};
+      const dvds = Object.keys(pk).length;
+      const totalCorrect = Math.max(st.totalCorrect || 0, dvds);
+      const streak = st.currentStreak || 0;
+      const played = st.played || 0;
+      return {
+        username: r.username,
+        displayName: r.display_name || r.username,
+        streak,
+        totalCorrect,
+        dvds,
+        played
+      };
+    });
+
+    parsed.sort((a, b) => {
+      if (b.totalCorrect !== a.totalCorrect) return b.totalCorrect - a.totalCorrect;
+      if (b.streak !== a.streak) return b.streak - a.streak;
+      return b.dvds - a.dvds;
+    });
+
+    listEl.innerHTML = "";
+    parsed.forEach((p, idx) => {
+      const isMe = state.profileSession && state.profileSession.username === p.username;
+      const rankBadge = idx === 0 ? "🥇" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : `${idx + 1}º`;
+      const row = document.createElement("div");
+      row.className = `leaderboard-item ${isMe ? "is-me" : ""}`;
+      row.innerHTML = `
+        <span class="leaderboard-rank">${rankBadge}</span>
+        <div class="leaderboard-user">
+          <span class="leaderboard-name">${escapeHtml(p.displayName)}</span>
+          <span class="leaderboard-sub">${p.dvds} DVDs • ${p.played} ${p.played === 1 ? "jogo" : "jogos"}</span>
+        </div>
+        <div class="leaderboard-badges">
+          <span class="leaderboard-pill">🔥 ${p.streak}</span>
+          <span class="leaderboard-pill">🎯 ${p.totalCorrect}</span>
+        </div>
+      `;
+      listEl.appendChild(row);
+    });
+  } catch (_) {}
+}
+
+// ============================================================================
 // 12. COUNTDOWN PARA MEIA-NOITE
 // ============================================================================
 
@@ -2131,6 +3048,168 @@ function bindEvents() {
     document.getElementById("modal-stats").classList.remove("hidden");
   });
 
+  // Navegação Liquid Glass (Jogo / Coleção / Perfil) com suporte a toque E arraste contínuo da gota líquida iOS 27
+  const navShell = document.getElementById("liquid-glass-shell");
+  const navGlider = document.getElementById("liquid-glass-glider");
+  const navTabs = ["game", "pokedex", "profile"];
+  const navButtons = [
+    document.getElementById("nav-tab-game"),
+    document.getElementById("nav-tab-pokedex"),
+    document.getElementById("nav-tab-profile")
+  ];
+
+  let navDragState = {
+    pointerDown: false,
+    dragging: false,
+    startX: 0,
+    startIdx: 0,
+    currentIdx: 0,
+    suppressClickUntil: 0
+  };
+
+  function getTabIdxFromName(tabName) {
+    if (tabName === "pokedex") return 1;
+    if (tabName === "profile") return 2;
+    return 0;
+  }
+
+  function computeContinuousIdxFromClientX(clientX) {
+    if (!navShell) return 0;
+    const rect = navShell.getBoundingClientRect();
+    const pad = 4;
+    const innerWidth = Math.max(1, rect.width - pad * 2);
+    const pillWidth = innerWidth / 3;
+    // Posição do centro da pílula seguindo o dedo
+    const rawIdx = (clientX - rect.left - pad - pillWidth / 2) / pillWidth;
+    // Resistência elástica sutil nas extremidades (rubber-band iOS)
+    if (rawIdx < 0) return Math.max(-0.12, rawIdx * 0.25);
+    if (rawIdx > 2) return Math.min(2.12, 2 + (rawIdx - 2) * 0.25);
+    return rawIdx;
+  }
+
+  function highlightNavButtonAtIdx(roundedIdx) {
+    navButtons.forEach((btn, i) => {
+      if (!btn) return;
+      btn.classList.toggle("active", i === roundedIdx);
+    });
+  }
+
+  if (navShell && navGlider) {
+    navShell.addEventListener("pointerdown", e => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      navDragState.pointerDown = true;
+      navDragState.dragging = false;
+      navDragState.startX = e.clientX;
+      navDragState.startIdx = getTabIdxFromName(state.activeTab);
+      navDragState.currentIdx = navDragState.startIdx;
+    });
+
+    navShell.addEventListener("pointermove", e => {
+      if (!navDragState.pointerDown) return;
+      const dx = Math.abs(e.clientX - navDragState.startX);
+      if (!navDragState.dragging && dx > 6) {
+        navDragState.dragging = true;
+        try {
+          navShell.setPointerCapture(e.pointerId);
+        } catch (_) {}
+        navGlider.classList.add("is-dragging");
+        navGlider.style.setProperty("--glider-sx", "1.1");
+        navGlider.style.setProperty("--glider-sy", "1.03");
+      }
+
+      if (navDragState.dragging) {
+        const contIdx = computeContinuousIdxFromClientX(e.clientX);
+        navDragState.currentIdx = contIdx;
+        navGlider.style.setProperty("--glider-idx", contIdx.toFixed(3));
+        const nearest = Math.max(0, Math.min(2, Math.round(contIdx)));
+        highlightNavButtonAtIdx(nearest);
+      }
+    });
+
+    const finishNavDrag = e => {
+      if (!navDragState.pointerDown) return;
+      const wasDragging = navDragState.dragging;
+      navDragState.pointerDown = false;
+      navDragState.dragging = false;
+
+      if (wasDragging) {
+        try {
+          if (e && e.pointerId != null) navShell.releasePointerCapture(e.pointerId);
+        } catch (_) {}
+        navDragState.suppressClickUntil = Date.now() + 250;
+        navGlider.classList.remove("is-dragging");
+        const targetIdx = Math.max(0, Math.min(2, Math.round(navDragState.currentIdx)));
+        const targetTab = navTabs[targetIdx] || "game";
+        switchMainTab(targetTab);
+      } else if (e && e.type === "pointerup") {
+        // Clique/toque rápido sem arrastar: muda a página instantaneamente e desliza a gota rapidamente até o ícone clicado!
+        const btn = e.target && e.target.closest ? e.target.closest(".liquid-nav-item") : null;
+        let targetTab = btn ? btn.getAttribute("data-tab") : null;
+        if (!targetTab) {
+          const rect = navShell.getBoundingClientRect();
+          const slotIdx = Math.max(0, Math.min(2, Math.floor(((e.clientX - rect.left) / Math.max(1, rect.width)) * 3)));
+          targetTab = navTabs[slotIdx] || "game";
+        }
+        navDragState.suppressClickUntil = Date.now() + 250;
+        switchMainTab(targetTab);
+      }
+    };
+
+    navShell.addEventListener("pointerup", finishNavDrag);
+    navShell.addEventListener("pointercancel", finishNavDrag);
+  }
+
+  document.getElementById("nav-tab-game")?.addEventListener("click", () => {
+    if (Date.now() < navDragState.suppressClickUntil) return;
+    switchMainTab("game");
+  });
+  document.getElementById("nav-tab-pokedex")?.addEventListener("click", () => {
+    if (Date.now() < navDragState.suppressClickUntil) return;
+    switchMainTab("pokedex");
+  });
+  document.getElementById("nav-tab-profile")?.addEventListener("click", () => {
+    if (Date.now() < navDragState.suppressClickUntil) return;
+    switchMainTab("profile");
+  });
+
+  // Eventos da aba Perfil (Login / Criar Conta / Sincronizar / Sair)
+  document.getElementById("auth-tab-login")?.addEventListener("click", () => {
+    setAuthMode("login");
+  });
+  document.getElementById("auth-tab-register")?.addEventListener("click", () => {
+    setAuthMode("register");
+  });
+  document.getElementById("profile-auth-form")?.addEventListener("submit", handleProfileAuthSubmit);
+
+  document.getElementById("btn-profile-sync")?.addEventListener("click", () => {
+    pullAndMergeCloudSave(true);
+    loadLeaderboardFromCloud();
+  });
+
+  document.getElementById("btn-profile-logout")?.addEventListener("click", () => {
+    saveProfileSession(null);
+    renderProfileView();
+    loadLeaderboardFromCloud();
+    showToast("Você saiu da conta.");
+  });
+
+  // Sincroniza automaticamente quando a pessoa volta para a aba/app no celular ou PC
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && state.profileSession) {
+      pullAndMergeCloudSave(false);
+    }
+  });
+
+  // Filtros da Coleção
+  document.querySelectorAll("#pokedex-view .pokedex-filter-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#pokedex-view .pokedex-filter-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      state.pokedexFilter = btn.getAttribute("data-filter") || "all";
+      renderPokedexView();
+    });
+  });
+
   document.querySelectorAll(".modal-close").forEach(btn => {
     btn.addEventListener("click", () => {
       const targetId = btn.getAttribute("data-close");
@@ -2179,6 +3258,16 @@ async function initApp() {
     state.answers = savedDaily.answers || [];
     state.phaseHints = savedDaily.phaseHints || {};
     state.completed = Boolean(savedDaily.completed);
+    state.dailyStartedAt =
+      Number(savedDaily.startedAt) || (state.answers.length > 0 ? Date.now() : 0);
+  }
+
+  syncPokedexFromProgress();
+
+  // Carrega sessão do Perfil e sincroniza na nuvem com o Supabase automaticamente
+  state.profileSession = loadProfileSession();
+  if (state.profileSession) {
+    pullAndMergeCloudSave(false);
   }
 
   document.getElementById("loading-view").classList.add("hidden");
