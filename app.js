@@ -36,18 +36,13 @@ const state = {
   posterInflight: {},
   deferredInstallPrompt: null,
   gyro: {
-    enabled: false,
-    listening: false,
-    permissionRequested: false,
     active3D: false,
-    baseBeta: null,
-    baseGamma: null,
     targetRx: 0,
     targetRy: 0,
     currentRx: 0,
     currentRy: 0,
-    hasSensorData: false,
     pointerInteracting: false,
+    lastDragDist: 0,
     rafId: null
   }
 };
@@ -147,183 +142,98 @@ function initWebAppInstallPrompt() {
 }
 
 // ============================================================================
-// 3. BOX DE DVD 3D COM GIROSCÓPIO (SEM MOSTRAR O VERSO)
+// 3. BOX DE DVD 3D INTERATIVO COM DEDO / MOUSE (SEM MOSTRAR O VERSO)
 // ============================================================================
 
 function clamp(val, min, max) {
   return Math.max(min, Math.min(max, val));
 }
 
-function requestGyroPermissionFromUserGesture() {
-  if (state.gyro.listening || state.gyro.permissionRequested) return;
-  state.gyro.permissionRequested = true;
-
-  // No iOS 13+, solicita apenas 1 vez por sessão a permissão do DeviceOrientationEvent
-  if (
-    typeof DeviceOrientationEvent !== "undefined" &&
-    typeof DeviceOrientationEvent.requestPermission === "function"
-  ) {
-    DeviceOrientationEvent.requestPermission()
-      .then(status => {
-        if (status === "granted") {
-          attachGyroListener();
-        }
-      })
-      .catch(() => {});
-    return;
-  }
-
-  attachGyroListener();
-}
-
-function normalizeAngleDelta(delta) {
-  if (delta > 180) return delta - 360;
-  if (delta < -180) return delta + 360;
-  return delta;
-}
-
-function attachGyroListener() {
-  if (state.gyro.listening) return;
-  state.gyro.listening = true;
-
-  let hasOrientationAngles = false;
-
-  function handleOrientationEvent(e) {
-    if (!state.gyro.active3D || state.gyro.pointerInteracting) return;
-    if (e.gamma == null || e.beta == null) return;
-    if (e.gamma === 0 && e.beta === 0 && e.alpha === 0) return;
-
-    hasOrientationAngles = true;
-    state.gyro.hasSensorData = true;
-
-    if (state.gyro.baseBeta === null || state.gyro.baseGamma === null) {
-      state.gyro.baseBeta = e.beta;
-      state.gyro.baseGamma = e.gamma;
-    }
-
-    const deltaGamma = normalizeAngleDelta(e.gamma - state.gyro.baseGamma);
-    const deltaBeta = normalizeAngleDelta(e.beta - state.gyro.baseBeta);
-
-    // Recalibra suavemente a base se a pessoa mudar muito a postura do celular
-    if (Math.abs(deltaGamma) > 45) {
-      state.gyro.baseGamma = e.gamma - Math.sign(deltaGamma) * 30;
-    }
-    if (Math.abs(deltaBeta) > 45) {
-      state.gyro.baseBeta = e.beta - Math.sign(deltaBeta) * 25;
-    }
-
-    // Eixo centralizado em 0° (reto) na posição em que a pessoa segura o celular!
-    state.gyro.targetRy = clamp(deltaGamma * 0.95, -26, 26);
-    state.gyro.targetRx = clamp(-deltaBeta * 0.75, -18, 18);
-  }
-
-  // 1. Sensor de orientação padrão (iOS + Android com giroscópio)
-  window.addEventListener("deviceorientation", handleOrientationEvent, true);
-
-  // 2. Sensor de orientação absoluta do Chrome no Android
-  if ("ondeviceorientationabsolute" in window) {
-    window.addEventListener("deviceorientationabsolute", handleOrientationEvent, true);
-  }
-
-  // 3. Fallback universal para Android (DeviceMotion / Acelerômetro de gravidade)
-  // Funciona mesmo em celulares Android que não possuem giroscópio físico dedicado!
-  let baseGx = null;
-  let baseGy = null;
-
-  function applyGravityVector(gx, gy) {
-    if (!state.gyro.active3D || state.gyro.pointerInteracting || hasOrientationAngles) return;
-    if (gx == null || gy == null) return;
-
-    state.gyro.hasSensorData = true;
-
-    if (baseGx === null || baseGy === null) {
-      baseGx = gx;
-      baseGy = gy;
-    }
-
-    const dGx = gx - baseGx;
-    const dGy = gy - baseGy;
-
-    // Eixo centralizado em 0° (reto)
-    state.gyro.targetRy = clamp(-dGx * 4.2, -26, 26);
-    state.gyro.targetRx = clamp(dGy * 3.2, -18, 18);
-  }
-
-  window.addEventListener(
-    "devicemotion",
-    e => {
-      const ag = e.accelerationIncludingGravity;
-      if (!ag) return;
-      applyGravityVector(ag.x, ag.y);
-    },
-    true
-  );
-
-  // 4. API nativa Generic Sensor do Chrome no Android (Accelerometer / GravitySensor)
-  try {
-    const SensorClass = window.GravitySensor || window.Accelerometer;
-    if ( typeof SensorClass === "function" ) {
-      const sensor = new SensorClass({ frequency: 30 });
-      sensor.addEventListener("reading", () => {
-        applyGravityVector(sensor.x, sensor.y);
-      });
-      sensor.start();
-    }
-  } catch (_) {}
-}
-
 function initDvd3dInteractions() {
   const stage = document.getElementById("dvd-stage");
-  if (!stage) return;
+  const shelfStage = document.getElementById("summary-shelf-stage");
 
-  // No Android, não precisa esperar permissão de clique como no iOS: já ativa os sensores ao carregar!
-  if (
-    typeof DeviceOrientationEvent === "undefined" ||
-    typeof DeviceOrientationEvent.requestPermission !== "function"
-  ) {
-    attachGyroListener();
-  }
+  let isDragging = false;
+  let dragStartX = 0;
+  let dragStartY = 0;
+  let dragStartRx = 0;
+  let dragStartRy = 0;
 
-  function updateFromPointer(clientX, clientY, targetStage) {
-    if (!state.gyro.active3D || !targetStage) return;
-    const rect = targetStage.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
-    const nx = ((clientX - rect.left) / rect.width) * 2 - 1;  // -1..1
-    const ny = ((clientY - rect.top) / rect.height) * 2 - 1;  // -1..1
-
-    state.gyro.targetRy = clamp(nx * 25, -26, 26);
-    state.gyro.targetRx = clamp(-ny * 17, -18, 18);
-  }
-
-  stage.addEventListener("pointerdown", e => {
+  function beginDrag(clientX, clientY) {
     if (!state.gyro.active3D) return;
+    isDragging = true;
     state.gyro.pointerInteracting = true;
-    updateFromPointer(e.clientX, e.clientY, stage);
+    state.gyro.lastDragDist = 0;
+    dragStartX = clientX;
+    dragStartY = clientY;
+    dragStartRx = state.gyro.currentRx;
+    dragStartRy = state.gyro.currentRy;
+  }
+
+  function moveDrag(clientX, clientY) {
+    if (!state.gyro.active3D || !isDragging) return;
+    const dx = clientX - dragStartX;
+    const dy = clientY - dragStartY;
+    const dist = Math.hypot(dx, dy);
+    if (dist > state.gyro.lastDragDist) {
+      state.gyro.lastDragDist = dist;
+    }
+
+    state.gyro.targetRy = clamp(dragStartRy + dx * 0.45, -28, 28);
+    state.gyro.targetRx = clamp(dragStartRx - dy * 0.36, -20, 20);
+  }
+
+  function endDrag() {
+    if (!isDragging) return;
+    isDragging = false;
+    state.gyro.pointerInteracting = false;
+  }
+
+  [stage, shelfStage].forEach(el => {
+    if (!el) return;
+
+    // Impede o navegador de tentar "arrastar o arquivo da imagem" ao clicar e puxar com o mouse
+    el.addEventListener("dragstart", e => {
+      e.preventDefault();
+    });
+
+    el.addEventListener("pointerdown", e => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      beginDrag(e.clientX, e.clientY);
+    });
+
+    el.addEventListener(
+      "touchstart",
+      e => {
+        if (e.touches && e.touches.length === 1) {
+          beginDrag(e.touches[0].clientX, e.touches[0].clientY);
+        }
+      },
+      { passive: true }
+    );
+
+    el.addEventListener(
+      "touchmove",
+      e => {
+        if (isDragging && e.touches && e.touches.length === 1) {
+          moveDrag(e.touches[0].clientX, e.touches[0].clientY);
+        }
+      },
+      { passive: true }
+    );
+
+    el.addEventListener("touchend", endDrag, { passive: true });
+    el.addEventListener("touchcancel", endDrag, { passive: true });
   });
 
   window.addEventListener("pointermove", e => {
-    if (!state.gyro.active3D) return;
-    const shelfStage = document.getElementById("summary-shelf-stage");
-    const activeStage = !document.getElementById("summary-view")?.classList.contains("hidden") && shelfStage
-      ? shelfStage
-      : stage;
-
-    if (state.gyro.pointerInteracting || e.pointerType === "mouse") {
-      const rect = activeStage.getBoundingClientRect();
-      const inside =
-        e.clientX >= rect.left - 40 &&
-        e.clientX <= rect.right + 40 &&
-        e.clientY >= rect.top - 40 &&
-        e.clientY <= rect.bottom + 40;
-      if (state.gyro.pointerInteracting || inside) {
-        updateFromPointer(e.clientX, e.clientY, activeStage);
-      }
+    if (isDragging) {
+      moveDrag(e.clientX, e.clientY);
     }
   });
-
-  window.addEventListener("pointerup", () => {
-    state.gyro.pointerInteracting = false;
-  });
+  window.addEventListener("pointerup", endDrag);
+  window.addEventListener("pointercancel", endDrag);
+  window.addEventListener("blur", endDrag);
 }
 
 function startDvd3dAnimationLoop() {
@@ -337,19 +247,19 @@ function startDvd3dAnimationLoop() {
   function tick(now) {
     if (!state.gyro.active3D) return;
 
-    // Se o celular ainda não mexeu o giroscópio nem o dedo está tocando, faz um movimento suave de vitrine 3D
-    if (!state.gyro.hasSensorData && !state.gyro.pointerInteracting) {
+    // Enquanto o usuário não está arrastando com o dedo/mouse, mantém o movimento suave de vitrine 3D
+    if (!state.gyro.pointerInteracting) {
       const t = (now - startTime) * 0.0018;
       state.gyro.targetRy = -14 + Math.sin(t) * 10; // Oscila entre -24° e -4° mostrando a lombada do DVD
       state.gyro.targetRx = 4 + Math.cos(t * 0.8) * 5;
     }
 
     // Interpolação suave (lerp)
-    state.gyro.currentRx += (state.gyro.targetRx - state.gyro.currentRx) * 0.14;
-    state.gyro.currentRy += (state.gyro.targetRy - state.gyro.currentRy) * 0.14;
+    state.gyro.currentRx += (state.gyro.targetRx - state.gyro.currentRx) * 0.16;
+    state.gyro.currentRy += (state.gyro.targetRy - state.gyro.currentRy) * 0.16;
 
-    const rx = clamp(state.gyro.currentRx, -18, 18);
-    const ry = clamp(state.gyro.currentRy, -26, 26);
+    const rx = clamp(state.gyro.currentRx, -20, 20);
+    const ry = clamp(state.gyro.currentRy, -28, 28);
     const glareX = clamp(50 - ry * 1.6, 10, 90);
     const glareY = clamp(45 + rx * 1.8, 10, 90);
 
@@ -408,8 +318,7 @@ function setDvd3dMode(enable3D) {
   if (!stage) return;
 
   state.gyro.active3D = enable3D;
-  state.gyro.baseBeta = null;
-  state.gyro.baseGamma = null;
+  state.gyro.pointerInteracting = false;
 
   if (enable3D) {
     stage.classList.remove("flat-mode");
@@ -1844,9 +1753,6 @@ async function showRevealCard(phaseData, isCorrect, usedHint = false) {
 function handleSelectOption(selectedIndex) {
   if (state.answers[state.currentPhase]) return;
 
-  // Solicita permissão do giroscópio no iOS aproveitando o clique do usuário
-  requestGyroPermissionFromUserGesture();
-
   const phaseData = state.dailyPhases[state.currentPhase];
   const activeReviewObj = getActiveReviewForPhase(state.currentPhase) || phaseData.reviewObj;
   const isCorrect = selectedIndex === phaseData.correctIndex;
@@ -1928,8 +1834,6 @@ function renderSummaryDvdShelf() {
 
   function selectShelfDvd(selectedIdx) {
     activeIdx = selectedIdx;
-    state.gyro.baseBeta = null;
-    state.gyro.baseGamma = null;
     const stageWidth = shelfStage.clientWidth || 300;
     // Posição horizontal fixa em ordem (Fase 1..5 da esquerda pra direita), contida dentro do box central
     const stepX = Math.max(36, Math.min(48, (stageWidth - 114) / 4));
@@ -1991,7 +1895,7 @@ function renderSummaryDvdShelf() {
     `;
 
     item.addEventListener("click", () => {
-      requestGyroPermissionFromUserGesture();
+      if (state.gyro.lastDragDist > 10) return;
       selectShelfDvd(idx);
     });
 

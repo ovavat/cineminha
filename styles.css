@@ -620,6 +620,11 @@ html, body {
   justify-content: center;
   user-select: none;
   touch-action: none;
+  cursor: grab;
+}
+
+.dvd-stage:active {
+  cursor: grabbing;
 }
 
 .dvd-box-3d {
@@ -860,6 +865,9 @@ html, body {
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
   transform: translateZ(0.1px);
+  -webkit-user-drag: none;
+  user-select: none;
+  pointer-events: none;
 }
 
 .dvd-artwork-wrap .poster-skeleton,
@@ -1111,7 +1119,12 @@ html, body {
   align-items: center;
   justify-content: center;
   overflow: visible;
-  touch-action: pan-y;
+  touch-action: none;
+  cursor: grab;
+}
+
+.summary-shelf-stage:active {
+  cursor: grabbing;
 }
 
 .shelf-dvd-item {
@@ -1254,6 +1267,9 @@ html, body {
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
   transform: translateZ(0.1px);
+  -webkit-user-drag: none;
+  user-select: none;
+  pointer-events: none;
 }
 
 .shelf-dvd-glare {
