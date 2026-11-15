@@ -14,5 +14,11 @@ window.OVAVAT_MOVIE_SEARCH_HINTS = {
   "Desapega!": "Desapega! (filme)",
   "Tá Escrito": "Tá Escrito (filme)",
   "A Herança": "A Herança (filme de 2024)",
-  "Homens de Bem": "Homens de Bem (telefilme)"
+  "Homens de Bem": "Homens de Bem (telefilme)",
+  "Amor.com": "Amor.com",
+  "Matou a Família e Foi ao Cinema": "Matou a Família e Foi ao Cinema (1991)",
+  "Um Ano Inesquecível: Verão": "Um Ano Inesquecível - Verão",
+  "Um Ano Inesquecível: Outono": "Um Ano Inesquecível - Outono",
+  "Um Ano Inesquecível: Inverno": "Um Ano Inesquecível - Inverno",
+  "Um Ano Inesquecível: Primavera": "Um Ano Inesquecível - Primavera"
 };

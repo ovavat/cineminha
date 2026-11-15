@@ -14,7 +14,7 @@ const STORAGE_KEYS = {
   STATS: "ovavat_stats_v1",
   DAILY_PROGRESS: "ovavat_daily_v1",
   SHEET_CACHE: "ovavat_sheet_cache_v1",
-  POSTER_CACHE: "ovavat_poster_cache_v6_posters_only",
+  POSTER_CACHE: "ovavat_poster_cache_v9_wikidata_ptbr",
   THEME: "ovavat_theme_v2_light",
   PWA_DISMISSED_DATE: "ovavat_pwa_dismissed_v1"
 };
@@ -927,6 +927,21 @@ function normalizeTitleStrict(str) {
 }
 
 function isSameMovieTitle(candidateTitle, targetMovieTitle, optionalHint = "") {
+  const rawCandLower = String(candidateTitle || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (rawCandLower.includes("desambiguacao") || rawCandLower.includes("disambiguation")) {
+    return false;
+  }
+
+  // Se o hint exige um ano específico entre parênteses, ex: "(1991)", e o candidato tem outro ano ou não tem quando existe homônimo
+  const hintYearMatch = String(optionalHint || "").match(/\(.*?\b(19\d{2}|20\d{2})\b.*?\)/);
+  const candYearMatch = String(candidateTitle || "").match(/\(.*?\b(19\d{2}|20\d{2})\b.*?\)/);
+  if (hintYearMatch && candYearMatch && hintYearMatch[1] !== candYearMatch[1]) {
+    return false;
+  }
+
   const cand = normalizeTitleStrict(candidateTitle);
   const targ = normalizeTitleStrict(targetMovieTitle);
   const hintNorm = optionalHint ? normalizeTitleStrict(optionalHint) : "";
@@ -939,8 +954,9 @@ function isSameMovieTitle(candidateTitle, targetMovieTitle, optionalHint = "") {
   const targNoOFilme = targ.replace(/\bo filme\b/g, "").replace(/\s+/g, " ").trim();
   if (candNoOFilme === targNoOFilme) return true;
 
+  const candWords = cand.split(" ");
   const targWords = targ.split(" ");
-  if (targWords.length >= 2 && targ.length >= 8) {
+  if (candWords.length >= 2 && targWords.length >= 2 && cand.length >= 8 && targ.length >= 8) {
     if (cand.startsWith(targ + " ") || targ.startsWith(cand + " ")) {
       const targNumbers = targ.match(/\b\d+\b/g) || [];
       const candNumbers = cand.match(/\b\d+\b/g) || [];
@@ -975,18 +991,26 @@ function isUsablePosterUrl(url) {
   return true;
 }
 
-async function fetchCinemetaCandidates(movieTitle, knownImdbId = null) {
+async function fetchCinemetaCandidates(movieTitle, knownImdbId = null, expectedYear = null) {
   const urls = [];
 
   if (knownImdbId && String(knownImdbId).startsWith("tt")) {
+    const byId = await fetchImdbPosterByIdOrQuery(knownImdbId);
+    if (byId) urls.push(byId);
     urls.push(`https://images.metahub.space/poster/medium/${knownImdbId}/img`);
     try {
       const metaRes = await fetch(`https://v3-cinemeta.strem.io/meta/movie/${knownImdbId}.json`);
       if (metaRes.ok) {
         const metaData = await metaRes.json();
-        if (metaData?.meta?.poster) urls.push(metaData.meta.poster);
+        if (metaData?.meta?.poster && !urls.includes(metaData.meta.poster)) {
+          urls.push(metaData.meta.poster);
+        }
       }
     } catch (_) {}
+    // Se já temos o ID exato do IMDb do filme, não faz busca genérica por nome para não misturar homônimos (ex: versão de 1969 vs 1991)
+    if (urls.length > 0) {
+      return urls;
+    }
   }
 
   const cleanTitle = movieTitle.replace(/#/g, "").trim();
@@ -1004,7 +1028,16 @@ async function fetchCinemetaCandidates(movieTitle, knownImdbId = null) {
       if (metas.length === 0) continue;
 
       const exact = metas.find(m => isSameMovieTitle(m.name, cleanTitle));
-      const candidates = exact ? [exact, ...metas.filter(m => m !== exact)] : metas.slice(0, 2);
+      let candidates = exact ? [exact, ...metas.filter(m => m !== exact)] : metas.slice(0, 2);
+      if (expectedYear) {
+        const yearMatches = candidates.filter(m => {
+          const y = parseInt(String(m.releaseInfo || "").slice(0, 4), 10);
+          return y && Math.abs(y - expectedYear) <= 1;
+        });
+        if (yearMatches.length > 0) {
+          candidates = yearMatches;
+        }
+      }
 
       for (const meta of candidates) {
         const targNums = normalizeTitleStrict(cleanTitle).match(/\b\d+\b/g) || [];
@@ -1078,6 +1111,7 @@ function fetchImdbV2Jsonp(queryStr, timeoutMs = 4500) {
 
 async function fetchImdbPosterByIdOrQuery(queryOrTtId) {
   const clean = queryOrTtId.replace(/#/g, "").trim();
+  const isTtId = /^tt\d+$/i.test(clean);
 
   try {
     const items = await fetchImdbV2Jsonp(clean);
@@ -1085,10 +1119,14 @@ async function fetchImdbPosterByIdOrQuery(queryOrTtId) {
       it => it.id && String(it.id).startsWith("tt") && it.i && (it.i[0] || it.i.imageUrl)
     );
     if (titleItems.length > 0) {
-      const exact = titleItems.find(it => isSameMovieTitle(it.l, clean)) || titleItems[0];
-      const rawUrl = Array.isArray(exact.i) ? exact.i[0] : exact.i.imageUrl;
-      if (rawUrl) {
-        return rawUrl.replace(/\._V1_.*\.jpg$/i, "._V1_SX500.jpg");
+      const exact = isTtId
+        ? titleItems.find(it => String(it.id).toLowerCase() === clean.toLowerCase()) || titleItems[0]
+        : titleItems.find(it => isSameMovieTitle(it.l, clean));
+      if (exact) {
+        const rawUrl = Array.isArray(exact.i) ? exact.i[0] : exact.i.imageUrl;
+        if (rawUrl) {
+          return rawUrl.replace(/\._V1_.*\.jpg$/i, "._V1_SX500.jpg");
+        }
       }
     }
   } catch (_) {}
@@ -1111,7 +1149,9 @@ async function fetchImdbPosterByIdOrQuery(queryOrTtId) {
       );
       if (titleItems.length === 0) continue;
 
-      const exact = titleItems.find(it => isSameMovieTitle(it.l, clean)) || titleItems[0];
+      const exact = isTtId
+        ? titleItems.find(it => String(it.id).toLowerCase() === clean.toLowerCase()) || titleItems[0]
+        : titleItems.find(it => isSameMovieTitle(it.l, clean));
       if (exact && exact.i && exact.i.imageUrl) {
         return exact.i.imageUrl.replace(/\._V1_.*\.jpg$/i, "._V1_SX500.jpg");
       }
@@ -1125,24 +1165,28 @@ async function extractInfoboxDataFromPageId(pageId, lang = "pt") {
   try {
     const parseUrl = `https://${lang}.wikipedia.org/w/api.php?action=parse&origin=*&format=json&pageid=${pageId}&prop=text`;
     const res = await fetch(parseUrl);
-    if (!res.ok) return { images: [], imdbId: null };
+    if (!res.ok) return { images: [], imdbId: null, year: null };
     const data = await res.json();
     const html = data?.parse?.text?.["*"];
-    if (!html) return { images: [], imdbId: null };
+    if (!html) return { images: [], imdbId: null, year: null };
 
     const imdbMatch = html.match(/imdb\.com\/title\/(tt\d{6,10})/i);
     const imdbId = imdbMatch ? imdbMatch[1] : null;
 
     const doc = new DOMParser().parseFromString(html, "text/html");
-    const infoboxText = (doc.querySelector(".infobox, .infobox_v2")?.textContent || "").toLowerCase();
+    const infoboxEl = doc.querySelector(".infobox, .infobox_v2, table.infobox");
+    const infoboxText = (infoboxEl?.textContent || "").toLowerCase();
     if (
       infoboxText.includes("nascimento") &&
       infoboxText.includes("ocupação") &&
       !infoboxText.includes("direção") &&
       !infoboxText.includes("lançamento")
     ) {
-      return { images: [], imdbId: null };
+      return { images: [], imdbId: null, year: null };
     }
+
+    const yearMatch = infoboxText.match(/\b(19\d{2}|20\d{2})\b/);
+    const year = yearMatch ? parseInt(yearMatch[1], 10) : null;
 
     const images = [];
     const imgs = doc.querySelectorAll(".infobox img, .infobox_v2 img, table.infobox img");
@@ -1155,12 +1199,56 @@ async function extractInfoboxDataFromPageId(pageId, lang = "pt") {
       if (src.startsWith("//")) src = "https:" + src;
       if (!isUsablePosterUrl(src)) continue;
 
-      src = src.replace(/\/(\d+)px-/, "/500px-");
-      images.push(src);
+      // Em imagens fair-use da Wikipedia PT (como Amorpontocom.jpg), a resolução original
+      // costuma ser < 500px (ex: 233px ou 250px), e forçar /500px- gera erro 404 no Wikimedia.
+      // Por isso, extraímos primeiro a URL original sem redimensionamento, depois tentamos 500px,
+      // e mantemos a miniatura original da infobox como garantia 100% funcional.
+      const origFromThumb = src.replace(
+        /\/thumb\/([a-f0-9]\/[a-f0-9]{2}\/[^/]+)\/\d+px-[^/]+$/i,
+        "/$1"
+      );
+      if (origFromThumb !== src && /\.(jpe?g|png|webp)$/i.test(origFromThumb)) {
+        images.push(origFromThumb);
+      }
+      const scaled500 = src.replace(/\/(\d+)px-/, "/500px-");
+      if (scaled500 !== src) {
+        images.push(scaled500);
+      }
+      if (!images.includes(src)) {
+        images.push(src);
+      }
     }
-    return { images, imdbId };
+    return { images, imdbId, year };
   } catch (_) {}
-  return { images: [], imdbId: null };
+  return { images: [], imdbId: null, year: null };
+}
+
+async function fetchWikidataImdbAndYear(wikibaseItem) {
+  if (!wikibaseItem) return { imdbId: null, year: null };
+  try {
+    const url = `https://www.wikidata.org/w/api.php?action=wbgetentities&origin=*&format=json&ids=${encodeURIComponent(wikibaseItem)}&props=claims`;
+    const res = await fetch(url);
+    if (!res.ok) return { imdbId: null, year: null };
+    const data = await res.json();
+    const claims = data?.entities?.[wikibaseItem]?.claims;
+    if (!claims) return { imdbId: null, year: null };
+
+    let imdbId = null;
+    const p345 = claims.P345?.[0]?.mainsnak?.datavalue?.value;
+    if (p345 && String(p345).startsWith("tt")) {
+      imdbId = String(p345);
+    }
+
+    let year = null;
+    const p577 = claims.P577?.[0]?.mainsnak?.datavalue?.value?.time;
+    if (p577) {
+      const m = String(p577).match(/\b(19\d{2}|20\d{2})\b/);
+      if (m) year = parseInt(m[1], 10);
+    }
+
+    return { imdbId, year };
+  } catch (_) {}
+  return { imdbId: null, year: null };
 }
 
 async function fetchWikipediaCandidates(movieTitle, lang = "pt") {
@@ -1177,59 +1265,94 @@ async function fetchWikipediaCandidates(movieTitle, lang = "pt") {
 
   const imageUrls = [];
   let foundImdbId = null;
+  let foundYear = null;
 
   for (const q of queries) {
-    const endpoint = `https://${lang}.wikipedia.org/w/api.php?action=query&origin=*&format=json&generator=search&gsrsearch=${encodeURIComponent(q)}&gsrlimit=5&prop=pageimages&piprop=thumbnail|original&pithumbsize=600&pilicense=any`;
+    const endpoint = `https://${lang}.wikipedia.org/w/api.php?action=query&origin=*&format=json&generator=search&gsrsearch=${encodeURIComponent(q)}&gsrlimit=5&prop=pageimages|pageprops&piprop=thumbnail|original&pithumbsize=600&pilicense=any`;
 
     const res = await fetch(endpoint);
     if (!res.ok) continue;
     const data = await res.json();
     if (!data?.query?.pages) continue;
 
-    const pages = Object.values(data.query.pages).sort(
-      (a, b) => (a.index || 99) - (b.index || 99)
-    );
+    const pages = Object.values(data.query.pages).sort((a, b) => {
+      const aExactHint = hint && String(a.title || "").toLowerCase() === hint.toLowerCase() ? 0 : 1;
+      const bExactHint = hint && String(b.title || "").toLowerCase() === hint.toLowerCase() ? 0 : 1;
+      if (aExactHint !== bExactHint) return aExactHint - bExactHint;
+      const aExactQ = String(a.title || "").toLowerCase() === q.toLowerCase() ? 0 : 1;
+      const bExactQ = String(b.title || "").toLowerCase() === q.toLowerCase() ? 0 : 1;
+      if (aExactQ !== bExactQ) return aExactQ - bExactQ;
+      return (a.index || 99) - (b.index || 99);
+    });
 
     for (const page of pages) {
       if (!isSameMovieTitle(page.title, cleanTitle, hint)) {
         continue;
       }
 
-      const directImg =
-        (page.thumbnail && page.thumbnail.source) ||
-        (page.original && page.original.source);
-      if (isUsablePosterUrl(directImg)) {
-        imageUrls.push(directImg);
-      }
-
+      // Prioriza primeiro a imagem da Infobox da Wikipedia PT (que é o cartaz brasileiro oficial)
       const info = await extractInfoboxDataFromPageId(page.pageid, lang);
       if (info.imdbId && !foundImdbId) {
         foundImdbId = info.imdbId;
+      }
+      if (info.year && !foundYear) {
+        foundYear = info.year;
+      }
+      if (!foundImdbId && page.pageprops?.wikibase_item) {
+        const wd = await fetchWikidataImdbAndYear(page.pageprops.wikibase_item);
+        if (wd.imdbId) foundImdbId = wd.imdbId;
+        if (wd.year && !foundYear) foundYear = wd.year;
       }
       for (const u of info.images) {
         if (!imageUrls.includes(u)) imageUrls.push(u);
       }
 
+      const origImg = page.original && page.original.source;
+      if (isUsablePosterUrl(origImg) && !imageUrls.includes(origImg)) {
+        imageUrls.push(origImg);
+      }
+      const thumbImg = page.thumbnail && page.thumbnail.source;
+      if (isUsablePosterUrl(thumbImg) && !imageUrls.includes(thumbImg)) {
+        imageUrls.push(thumbImg);
+      }
+
       if (imageUrls.length > 0 || foundImdbId) {
-        return { imageUrls, imdbId: foundImdbId };
+        return { imageUrls, imdbId: foundImdbId, year: foundYear };
       }
     }
   }
 
-  return { imageUrls, imdbId: foundImdbId };
+  return { imageUrls, imdbId: foundImdbId, year: foundYear };
 }
 
-async function fetchPosterFromItunes(movieTitle) {
+async function fetchPosterFromItunes(movieTitle, expectedYear = null) {
   const cleanTitle = movieTitle.replace(/#/g, "").trim();
-  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(cleanTitle)}&country=BR&media=movie&entity=movie&limit=5`;
+  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(cleanTitle)}&country=BR&lang=pt_br&media=movie&entity=movie&limit=8`;
   const res = await fetch(url);
   if (!res.ok) return null;
   const data = await res.json();
   if (!data.results || data.results.length === 0) return null;
 
-  const exact = data.results.find(item => isSameMovieTitle(item.trackName, cleanTitle));
-  if (exact && exact.artworkUrl100) {
-    return exact.artworkUrl100.replace("100x100bb", "600x900bb");
+  const matchingTitles = data.results.filter(item => isSameMovieTitle(item.trackName, cleanTitle));
+  if (matchingTitles.length === 0) return null;
+
+  let chosen = matchingTitles[0];
+  if (expectedYear) {
+    const byYear = matchingTitles.find(item => {
+      if (!item.releaseDate) return false;
+      const itemYear = parseInt(String(item.releaseDate).slice(0, 4), 10);
+      return Math.abs(itemYear - expectedYear) <= 1;
+    });
+    if (byYear) {
+      chosen = byYear;
+    } else if (cleanTitle.split(/\s+/).length <= 2) {
+      // Se o título é curto/ambíguo e o ano da loja não bate com o filme real, ignora para não pegar filme homônimo errado!
+      return null;
+    }
+  }
+
+  if (chosen && chosen.artworkUrl100) {
+    return chosen.artworkUrl100.replace("100x100bb", "600x900bb");
   }
   return null;
 }
@@ -1244,8 +1367,6 @@ async function resolveMoviePoster(movieTitle) {
   }
 
   const promise = (async () => {
-    // Guarda a primeira imagem horizontal (cena/foto do filme) APENAS como último recurso
-    // caso nenhum pôster vertical (isPortrait) exista em nenhuma fonte.
     let fallbackNonPortraitUrl = null;
 
     async function checkCandidate(url) {
@@ -1261,21 +1382,13 @@ async function resolveMoviePoster(movieTitle) {
       return null;
     }
 
-    // 1. iTunes Movie Store BR (sempre cartazes oficiais brasileiros verticais 2:3)
-    try {
-      const itunesUrl = await fetchPosterFromItunes(movieTitle);
-      const portrait = await checkCandidate(itunesUrl);
-      if (portrait) {
-        savePosterToCache(movieTitle, portrait);
-        return portrait;
-      }
-    } catch (_) {}
-
-    // 2. Wikipedia PT (verifica primeiro se a imagem é um pôster vertical + extrai o ID tt do IMDb do filme)
+    // 1. Wikipedia PT-BR em 1º lugar (prioriza o cartaz brasileiro da Infobox + descobre ano e ID exato do IMDb)
     let wikiImdbId = null;
+    let wikiYear = null;
     try {
       const wikiPt = await fetchWikipediaCandidates(movieTitle, "pt");
       wikiImdbId = wikiPt.imdbId;
+      wikiYear = wikiPt.year;
       for (const candidateUrl of wikiPt.imageUrls) {
         const portrait = await checkCandidate(candidateUrl);
         if (portrait) {
@@ -1285,9 +1398,19 @@ async function resolveMoviePoster(movieTitle) {
       }
     } catch (_) {}
 
-    // 3. Cinemeta API + Metahub (usando tanto o ID exato do IMDb quanto o título do filme)
+    // 2. Apple TV / iTunes Store Brasil (country=BR&lang=pt_br — cartazes oficiais em português brasileiro, validando o ano)
     try {
-      const cinemetaUrls = await fetchCinemetaCandidates(movieTitle, wikiImdbId);
+      const itunesUrl = await fetchPosterFromItunes(movieTitle, wikiYear);
+      const portrait = await checkCandidate(itunesUrl);
+      if (portrait) {
+        savePosterToCache(movieTitle, portrait);
+        return portrait;
+      }
+    } catch (_) {}
+
+    // 3. Cinemeta API + Metahub (usando o ID exato do IMDb extraído da Wikipedia PT/Wikidata ou o título)
+    try {
+      const cinemetaUrls = await fetchCinemetaCandidates(movieTitle, wikiImdbId, wikiYear);
       for (const candidateUrl of cinemetaUrls) {
         const portrait = await checkCandidate(candidateUrl);
         if (portrait) {
@@ -1297,7 +1420,7 @@ async function resolveMoviePoster(movieTitle) {
       }
     } catch (_) {}
 
-    // 4. IMDb Suggest API (busca direta por ID ou título)
+    // 4. IMDb Suggest API (busca direta pelo ID exato do filme ou título)
     try {
       if (wikiImdbId) {
         const imdbById = await fetchImdbPosterByIdOrQuery(wikiImdbId);
@@ -1315,7 +1438,7 @@ async function resolveMoviePoster(movieTitle) {
       }
     } catch (_) {}
 
-    // 5. Se realmente não existir cartaz vertical em lugar nenhum, usa a outra imagem encontrada
+    // 5. Último recurso caso nenhum cartaz vertical exista em nenhuma fonte
     if (fallbackNonPortraitUrl) {
       savePosterToCache(movieTitle, fallbackNonPortraitUrl);
       return fallbackNonPortraitUrl;
