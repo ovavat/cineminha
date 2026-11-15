@@ -1801,7 +1801,7 @@ async function showRevealCard(phaseData, isCorrect, usedHint = false) {
   authorEl.textContent = activeReviewObj.author;
 
   if (state.currentPhase + 1 < TOTAL_PHASES) {
-    nextBtnText.textContent = `Próxima Fase (${state.currentPhase + 2}/${TOTAL_PHASES})`;
+    nextBtnText.textContent = "Próxima Fase";
   } else {
     nextBtnText.textContent = "Ver Resultado";
   }
@@ -1919,6 +1919,7 @@ function buildShareText() {
 
 function renderSummaryDvdShelf() {
   const shelfStage = document.getElementById("summary-shelf-stage");
+  const shelfCaptionBox = document.getElementById("summary-shelf-caption");
   const shelfCaption = document.getElementById("shelf-movie-name");
   if (!shelfStage) return;
 
@@ -1947,6 +1948,7 @@ function renderSummaryDvdShelf() {
       const scale = isSelected ? 1.1 : 0.92;
 
       item.classList.toggle("active", isSelected);
+      item.classList.toggle("is-left", idx < selectedIdx);
       item.style.zIndex = String(isSelected ? 30 : 20 - distFromSelected * 3);
       item.style.transform = `translate3d(${tx.toFixed(1)}px, ${ty.toFixed(1)}px, ${tz}px) rotateY(${ry}deg) rotateZ(${rz}deg) scale(${scale})`;
       item.style.filter = isSelected ? "brightness(1.04)" : "brightness(0.84)";
@@ -1955,8 +1957,12 @@ function renderSummaryDvdShelf() {
     const phase = state.dailyPhases[selectedIdx];
     const ans = state.answers[selectedIdx];
     if (phase && shelfCaption) {
-      const emoji = getAnswerEmoji(ans);
-      shelfCaption.textContent = `${emoji} Fase ${selectedIdx + 1}: ${phase.reviewObj.movie}`;
+      shelfCaption.textContent = phase.reviewObj.movie;
+    }
+    if (shelfCaptionBox) {
+      shelfCaptionBox.classList.remove("correct", "correct-hint", "wrong");
+      const statusClass = ans && ans.correct ? (ans.usedHint ? "correct-hint" : "correct") : "wrong";
+      shelfCaptionBox.classList.add(statusClass);
     }
   }
 

@@ -1054,10 +1054,10 @@ html, body {
 
 /* Summary View (Mantida igual) */
 .summary-card {
-  padding: 24px 18px;
+  padding: 22px 18px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
   overflow: hidden;
 }
 
@@ -1277,6 +1277,7 @@ html, body {
   position: absolute;
   bottom: 5px;
   right: 5px;
+  left: auto;
   width: 20px;
   height: 20px;
   border-radius: 50%;
@@ -1289,6 +1290,11 @@ html, body {
   z-index: 5;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
   border: 1.5px solid rgba(255, 255, 255, 0.85);
+}
+
+.shelf-dvd-item.is-left .shelf-status-dot {
+  right: auto;
+  left: 5px;
 }
 
 .shelf-status-dot.correct {
@@ -1307,12 +1313,49 @@ html, body {
 .summary-shelf-caption {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 5px 13px;
+  padding: 5px 14px;
   border-radius: 999px;
   background: var(--bg-secondary);
-  border: 0.5px solid var(--separator);
+  border: 1px solid var(--separator);
   max-width: 100%;
+  transition: background-color 0.22s ease, border-color 0.22s ease;
+}
+
+.summary-shelf-caption.correct {
+  background: var(--ios-green-tint);
+  border-color: rgba(52, 199, 89, 0.36);
+}
+
+.summary-shelf-caption.correct .shelf-movie-name {
+  color: #1e7e38;
+}
+
+[data-theme="dark"] .summary-shelf-caption.correct .shelf-movie-name {
+  color: #5ce07a;
+}
+
+.summary-shelf-caption.correct-hint {
+  background: var(--ios-yellow-tint);
+  border-color: rgba(234, 179, 8, 0.42);
+}
+
+.summary-shelf-caption.correct-hint .shelf-movie-name {
+  color: var(--ios-yellow-text);
+}
+
+.summary-shelf-caption.wrong {
+  background: var(--ios-red-tint);
+  border-color: rgba(255, 59, 48, 0.34);
+}
+
+.summary-shelf-caption.wrong .shelf-movie-name {
+  color: #c92a22;
+}
+
+[data-theme="dark"] .summary-shelf-caption.wrong .shelf-movie-name {
+  color: #ff736a;
 }
 
 .shelf-movie-name {
@@ -1323,6 +1366,7 @@ html, body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: color 0.22s ease;
 }
 
 .emoji-pill-box {
@@ -1374,8 +1418,21 @@ html, body {
 
 .share-stack {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: stretch;
   gap: 9px;
+}
+
+.share-stack .ios-btn-whatsapp {
+  flex: 1;
+  min-width: 0;
+}
+
+.ios-btn-icon-only {
+  width: 50px;
+  min-width: 50px;
+  padding: 0;
+  flex-shrink: 0;
 }
 
 .next-timer-row {
