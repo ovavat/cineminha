@@ -2294,14 +2294,22 @@ function switchMainTab(tabName) {
   }
 }
 
+function getMovieTitle(movieEntry) {
+  if (!movieEntry) return "";
+  return typeof movieEntry === "string" ? movieEntry : String(movieEntry.title || "");
+}
+
 function renderPokedexView() {
+  syncPokedexFromProgress();
+
   const grid = document.getElementById("pokedex-grid");
   const countBadge = document.getElementById("pokedex-count-badge");
   const progressFill = document.getElementById("pokedex-progress-fill");
   if (!grid) return;
 
-  const totalMovies = state.allMovies.length;
-  const unlockedCount = state.allMovies.filter(m => Boolean(state.pokedex[m])).length;
+  const movieTitles = state.allMovies.map(getMovieTitle).filter(Boolean);
+  const totalMovies = movieTitles.length;
+  const unlockedCount = movieTitles.filter(title => Boolean(state.pokedex[title])).length;
   const pct = totalMovies > 0 ? Math.round((unlockedCount / totalMovies) * 100) : 0;
 
   if (countBadge) {
@@ -2314,7 +2322,7 @@ function renderPokedexView() {
   grid.innerHTML = "";
 
   // Coloca os filmes já acertados (Descobertos em 3D) primeiro no topo da grade, mantendo o número #XXX original de cada um!
-  const entries = state.allMovies.map((movieName, idx) => ({
+  const entries = movieTitles.map((movieName, idx) => ({
     movieName,
     idx,
     isUnlocked: Boolean(state.pokedex[movieName])
