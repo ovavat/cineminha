@@ -1535,12 +1535,38 @@ function unlockMovieInPokedex(movieName, usedHint = false, dateStr = state.today
   savePokedex();
 }
 
+function getMovieFromAnswer(ans, idx, dateStr) {
+  if (!ans) return null;
+  if (ans.movie) return ans.movie;
+  if (dateStr === state.todayStr && state.dailyPhases[idx]?.reviewObj?.movie) {
+    return state.dailyPhases[idx].reviewObj.movie;
+  }
+  return null;
+}
+
 function syncPokedexFromProgress() {
   state.pokedex = loadPokedex();
   let changed = false;
 
-  // Desbloqueia apenas os filmes com resposta exata confirmada em ovavat_daily_v1 (a partir de hoje / último jogo salvo no aparelho),
-  // sem tentar adivinhar/reconstruir dias passados onde a lista de filmes não estava salva.
+  // 1. Garante que qualquer filme acertado em state.answers (memória atual de hoje) esteja com .movie preenchido e na Coleção
+  if (Array.isArray(state.answers) && state.answers.length > 0) {
+    state.answers.forEach((ans, idx) => {
+      if (!ans) return;
+      const mv = getMovieFromAnswer(ans, idx, state.todayStr);
+      if (mv && !ans.movie) {
+        ans.movie = mv;
+      }
+      if (ans.correct && mv && !state.pokedex[mv]) {
+        state.pokedex[mv] = {
+          unlockedAt: state.todayStr,
+          usedHint: Boolean(ans.usedHint)
+        };
+        changed = true;
+      }
+    });
+  }
+
+  // 2. Desbloqueia os filmes com resposta exata confirmada em ovavat_daily_v1
   try {
     const rawDaily = localStorage.getItem(STORAGE_KEYS.DAILY_PROGRESS);
     if (rawDaily) {
@@ -1549,9 +1575,7 @@ function syncPokedexFromProgress() {
       const ansList = dailyData?.answers || [];
       ansList.forEach((ans, idx) => {
         if (!ans || !ans.correct) return;
-        const mv =
-          ans.movie ||
-          (dailyDate === state.todayStr ? state.dailyPhases[idx]?.reviewObj?.movie : null);
+        const mv = getMovieFromAnswer(ans, idx, dailyDate);
         if (mv && !state.pokedex[mv]) {
           state.pokedex[mv] = {
             unlockedAt: dailyDate,
@@ -1568,7 +1592,9 @@ function syncPokedexFromProgress() {
           stats.history = {};
         }
         const dayScore = ansList.filter(a => a && a.correct).length;
-        const dayMovies = ansList.filter(a => a && a.correct && a.movie).map(a => a.movie);
+        const dayMovies = ansList
+          .map((a, i) => (a && a.correct ? getMovieFromAnswer(a, i, dailyDate) : null))
+          .filter(Boolean);
         const dayTs = Number(dailyData.startedAt) || Date.now();
         if (!stats.history[dailyDate]) {
           stats.history[dailyDate] = {
@@ -1577,6 +1603,33 @@ function syncPokedexFromProgress() {
             movies: dayMovies
           };
           saveStats(stats);
+        } else if (
+          typeof stats.history[dailyDate] === "object" &&
+          (!stats.history[dailyDate].movies || stats.history[dailyDate].movies.length === 0) &&
+          dayMovies.length > 0
+        ) {
+          stats.history[dailyDate].movies = dayMovies;
+          saveStats(stats);
+        }
+      }
+    }
+  } catch (_) {}
+
+  // 3. Garante que qualquer filme registrado em stats.history[dt].movies também esteja na Coleção
+  try {
+    const stats = getStats();
+    if (stats.history && typeof stats.history === "object") {
+      for (const [dt, entry] of Object.entries(stats.history)) {
+        if (entry && Array.isArray(entry.movies)) {
+          entry.movies.forEach(mv => {
+            if (mv && !state.pokedex[mv]) {
+              state.pokedex[mv] = {
+                unlockedAt: dt,
+                usedHint: false
+              };
+              changed = true;
+            }
+          });
         }
       }
     }
@@ -2481,13 +2534,18 @@ function mergeCloudAndLocalData(cloudRow) {
     const winningAns = useCloudToday ? cloudAns : localAns;
     const losingAns = useCloudToday ? localAns : cloudAns;
     const winningCorrectSet = new Set(
-      winningAns.filter(a => a && a.correct && a.movie).map(a => a.movie)
+      winningAns
+        .map((a, idx) => (a && a.correct ? getMovieFromAnswer(a, idx, state.todayStr) : null))
+        .filter(Boolean)
     );
-    losingAns.forEach(a => {
-      if (a && a.correct && a.movie && !winningCorrectSet.has(a.movie)) {
-        forbiddenTodayMovies.add(a.movie);
-      }
-    });
+    if (winningCorrectSet.size > 0) {
+      losingAns.forEach((a, idx) => {
+        const mv = a && a.correct ? getMovieFromAnswer(a, idx, state.todayStr) : null;
+        if (mv && !winningCorrectSet.has(mv)) {
+          forbiddenTodayMovies.add(mv);
+        }
+      });
+    }
 
     if (useCloudToday) {
       state.answers = cloudAns;

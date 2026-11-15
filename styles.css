@@ -1779,7 +1779,7 @@ html, body {
    ============================================================================ */
 .liquid-glass-nav {
   position: fixed;
-  bottom: max(12px, calc(env(safe-area-inset-bottom, 0px) - 16px));
+  bottom: 6px;
   left: 50%;
   transform: translateX(-50%);
   width: calc(100% - 64px);
