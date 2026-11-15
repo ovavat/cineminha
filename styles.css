@@ -2340,33 +2340,75 @@ html, body {
 
 .pokedex-modal-reviews {
   width: 100%;
-  max-height: 185px;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 4px;
+  align-items: center;
+  margin-top: 6px;
 }
 
-.pokedex-review-chip {
+.pokedex-rating-box {
+  width: 100%;
   background: var(--bg-secondary);
-  border-radius: 12px;
-  padding: 9px 11px;
+  border-radius: 16px;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  align-items: center;
+  gap: 6px;
 }
 
-.pokedex-review-author {
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: var(--accent);
+.pokedex-stars-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
 }
 
-.pokedex-review-text {
-  font-size: 0.8rem;
+.pokedex-star {
+  width: 26px;
+  height: 26px;
+  display: block;
+}
+
+.pokedex-star.full {
+  color: #FFB800;
+  filter: drop-shadow(0 2px 6px rgba(255, 184, 0, 0.28));
+}
+
+.pokedex-star.half {
+  filter: drop-shadow(0 2px 6px rgba(255, 184, 0, 0.2));
+}
+
+.pokedex-star.empty {
+  color: rgba(142, 142, 147, 0.25);
+}
+
+.pokedex-rating-score-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.pokedex-rating-avg {
+  font-size: 1.35rem;
+  font-weight: 800;
   color: var(--text-primary);
-  line-height: 1.35;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.pokedex-rating-max {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-tertiary);
+}
+
+.pokedex-rating-count {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text-secondary);
 }
 
 /* ============================================================================

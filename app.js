@@ -18,7 +18,7 @@ const STORAGE_KEYS = {
   DAILY_PROGRESS: "ovavat_daily_v1",
   POKEDEX: "ovavat_pokedex_v2",
   PROFILE_SESSION: "ovavat_profile_session_v1",
-  SHEET_CACHE: "ovavat_sheet_cache_v1",
+  SHEET_CACHE: "ovavat_sheet_cache_v2",
   POSTER_CACHE: "ovavat_poster_cache_v9_wikidata_ptbr",
   THEME: "ovavat_theme_v2_light",
   PWA_DISMISSED_DATE: "ovavat_pwa_dismissed_v1"
@@ -465,6 +465,7 @@ function parseGvizTable(table) {
   const rows = (table && table.rows) || [];
   const validReviews = [];
   const movieFirstDate = new Map();
+  const movieScores = new Map();
 
   for (let i = 0; i < rows.length; i++) {
     const c = rows[i].c;
@@ -478,6 +479,17 @@ function parseGvizTable(table) {
     const rowIso = parseBrDateToIso(dateFormatted);
     if (!movieFirstDate.has(movie) || (rowIso && rowIso < movieFirstDate.get(movie))) {
       movieFirstDate.set(movie, rowIso);
+    }
+
+    // Coluna C (c[2]): Nota de 0 a 10 dada para o filme
+    if (c[2] && c[2].v != null) {
+      const numericGrade = Number(String(c[2].v).replace(",", "."));
+      if (!Number.isNaN(numericGrade) && numericGrade >= 0 && numericGrade <= 10) {
+        const prev = movieScores.get(movie) || { sum: 0, count: 0 };
+        prev.sum += numericGrade;
+        prev.count += 1;
+        movieScores.set(movie, prev);
+      }
     }
 
     const colF = c[5] && c[5].v != null ? String(c[5].v).trim() : "";
@@ -507,7 +519,12 @@ function parseGvizTable(table) {
 
   const movies = Array.from(movieFirstDate.entries())
     .sort((a, b) => a[0].localeCompare(b[0], "pt-BR"))
-    .map(([title, firstIso]) => ({ title, firstIso }));
+    .map(([title, firstIso]) => {
+      const sc = movieScores.get(title);
+      const avgRating = sc && sc.count > 0 ? sc.sum / sc.count : null;
+      const ratingCount = sc ? sc.count : 0;
+      return { title, firstIso, avgRating, ratingCount };
+    });
 
   return {
     reviews: validReviews,
@@ -2385,6 +2402,41 @@ function renderPokedexView() {
   });
 }
 
+function buildStarsSvgHtml(starsOutOf5) {
+  const starPath =
+    "M12 2.2l2.92 5.92 6.53.95-4.72 4.6 1.11 6.5L12 17.1l-5.84 3.07 1.11-6.5-4.72-4.6 6.53-.95L12 2.2z";
+  let html = "";
+  for (let i = 1; i <= 5; i++) {
+    if (starsOutOf5 >= i) {
+      // Estrela cheia
+      html += `
+        <svg class="pokedex-star full" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="${starPath}" fill="#FFB800" stroke="#FFB800" stroke-width="1.4" stroke-linejoin="round" />
+        </svg>`;
+    } else if (starsOutOf5 >= i - 0.5) {
+      // Meia estrela
+      const gradId = `half-star-grad-${i}`;
+      html += `
+        <svg class="pokedex-star half" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+          <defs>
+            <linearGradient id="${gradId}" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="50%" stop-color="#FFB800" />
+              <stop offset="50%" stop-color="transparent" />
+            </linearGradient>
+          </defs>
+          <path d="${starPath}" fill="url(#${gradId})" stroke="#FFB800" stroke-width="1.5" stroke-linejoin="round" />
+        </svg>`;
+    } else {
+      // Estrela vazia
+      html += `
+        <svg class="pokedex-star empty" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="${starPath}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+        </svg>`;
+    }
+  }
+  return html;
+}
+
 function openPokedexDvdModal(movieName, numStr) {
   const modal = document.getElementById("modal-pokedex-dvd");
   const numEl = document.getElementById("pokedex-modal-num");
@@ -2403,17 +2455,34 @@ function openPokedexDvdModal(movieName, numStr) {
   }
 
   if (reviewsEl) {
-    reviewsEl.innerHTML = "";
-    const movieReviews = state.allReviews.filter(r => r.movie === movieName);
-    movieReviews.forEach(rev => {
-      const chip = document.createElement("div");
-      chip.className = "pokedex-review-chip";
-      chip.innerHTML = `
-        <span class="pokedex-review-author">por ${escapeHtml(rev.author)}</span>
-        <p class="pokedex-review-text">“${escapeHtml(rev.review)}”</p>
+    const movieObj = state.allMovies.find(m => getMovieTitle(m) === movieName);
+    const avg = movieObj && typeof movieObj.avgRating === "number" ? movieObj.avgRating : null;
+    const count = movieObj && movieObj.ratingCount ? movieObj.ratingCount : 0;
+
+    if (avg != null) {
+      // Converte nota 0..10 para 0..5 estrelas em passos de 0.5 (ex: 8,47 -> 4 estrelas; 4,21 -> 2 estrelas; 5,33 -> 2.5 estrelas)
+      const stars = Math.round(avg) / 2;
+      const avgFormatted = avg.toFixed(2).replace(".", ",");
+      const starsFormatted = String(stars).replace(".", ",");
+      reviewsEl.innerHTML = `
+        <div class="pokedex-rating-box">
+          <div class="pokedex-stars-row" aria-label="${starsFormatted} de 5 estrelas">
+            ${buildStarsSvgHtml(stars)}
+          </div>
+          <div class="pokedex-rating-score-row">
+            <span class="pokedex-rating-avg">${avgFormatted}</span>
+            <span class="pokedex-rating-max">/ 10</span>
+          </div>
+          <span class="pokedex-rating-count">Média de ${count} ${count === 1 ? "nota" : "notas"}</span>
+        </div>
       `;
-      reviewsEl.appendChild(chip);
-    });
+    } else {
+      reviewsEl.innerHTML = `
+        <div class="pokedex-rating-box">
+          <span class="pokedex-rating-count">Sem notas registradas</span>
+        </div>
+      `;
+    }
   }
 
   setDvd3dMode(true);
