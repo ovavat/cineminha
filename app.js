@@ -3088,9 +3088,13 @@ async function loadLeaderboardFromCloud() {
     });
 
     listEl.innerHTML = "";
+    let currentRank = 1;
     parsed.forEach((p, idx) => {
+      if (idx > 0 && p.totalCorrect < parsed[idx - 1].totalCorrect) {
+        currentRank = idx + 1;
+      }
       const isMe = state.profileSession && state.profileSession.username === p.username;
-      const rankBadge = idx === 0 ? "🥇" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : `${idx + 1}º`;
+      const rankBadge = currentRank === 1 ? "🥇" : currentRank === 2 ? "🥈" : currentRank === 3 ? "🥉" : `${currentRank}º`;
       const row = document.createElement("div");
       row.className = `leaderboard-item ${isMe ? "is-me" : ""}`;
       row.innerHTML = `

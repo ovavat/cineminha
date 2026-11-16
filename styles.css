@@ -2900,9 +2900,3 @@ html, body {
   font-variant-numeric: tabular-nums;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
 }
-
-.leaderboard-item.is-me .leaderboard-score-pill {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #FFFFFF;
-}
