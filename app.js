@@ -9,6 +9,7 @@ const GVIZ_JSONP_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/
 
 const TOTAL_PHASES = 5;
 const LAUNCH_DATE_STR = "2026-11-13"; // Dia #1 do Cineminha do Ovavat
+const COLLECTION_START_DATE = "2026-11-15"; // Só considera filmes/acertos/DVDs a partir desta data (dias anteriores contam apenas para streak)
 
 const SUPABASE_URL = "https://riyvxpgyouxyljhfqknj.supabase.co";
 const SUPABASE_KEY = "sb_publishable_QkT0GDOivwCnfeBfVQ6nJw_e-CoJ_ic";
@@ -1416,11 +1417,63 @@ function preloadDailyPosters() {
 // 9. PERSISTÊNCIA DE STREAKS, PROGRESSO DO DIA E RESET DE TESTE
 // ============================================================================
 
+function sanitizePokedexMap(rawPokedex) {
+  const clean = {};
+  if (!rawPokedex || typeof rawPokedex !== "object") return clean;
+  for (const [mv, info] of Object.entries(rawPokedex)) {
+    if (!mv || !info || typeof info !== "object") continue;
+    const unlockedAt = String(info.unlockedAt || "");
+    if (unlockedAt && unlockedAt >= COLLECTION_START_DATE) {
+      clean[mv] = {
+        unlockedAt,
+        usedHint: Boolean(info.usedHint)
+      };
+    }
+  }
+  return clean;
+}
+
+function sanitizeStatsObject(rawStats) {
+  const st = rawStats && typeof rawStats === "object" ? { ...rawStats } : {};
+  const rawHist = st.history && typeof st.history === "object" ? st.history : {};
+  const cleanHist = {};
+
+  for (const [dt, entry] of Object.entries(rawHist)) {
+    if (dt >= COLLECTION_START_DATE && entry) {
+      cleanHist[dt] = normalizeHistoryEntry(entry);
+    }
+  }
+
+  const validDates = Object.keys(cleanHist).sort();
+  let totalCorrect = 0;
+  const dist = [0, 0, 0, 0, 0, 0];
+
+  for (const dt of validDates) {
+    const sc = Math.min(5, Math.max(0, Number(cleanHist[dt].score) || 0));
+    totalCorrect += sc;
+    dist[sc] = (dist[sc] || 0) + 1;
+  }
+
+  const currentStreak = Math.max(0, Number(st.currentStreak) || 0);
+  const maxStreak = Math.max(currentStreak, Number(st.maxStreak) || 0);
+  const played = Math.max(validDates.length, currentStreak, Number(st.played) || 0);
+
+  return {
+    played,
+    totalCorrect,
+    currentStreak,
+    maxStreak,
+    lastCompletedDate: st.lastCompletedDate || (validDates[validDates.length - 1] || null),
+    distribution: dist,
+    history: cleanHist
+  };
+}
+
 function getStats() {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.STATS);
     if (raw) {
-      return JSON.parse(raw);
+      return sanitizeStatsObject(JSON.parse(raw));
     }
   } catch (_) {}
   return {
@@ -1429,13 +1482,14 @@ function getStats() {
     currentStreak: 0,
     maxStreak: 0,
     lastCompletedDate: null,
-    distribution: [0, 0, 0, 0, 0, 0]
+    distribution: [0, 0, 0, 0, 0, 0],
+    history: {}
   };
 }
 
 function saveStats(stats) {
   try {
-    localStorage.setItem(STORAGE_KEYS.STATS, JSON.stringify(stats));
+    localStorage.setItem(STORAGE_KEYS.STATS, JSON.stringify(sanitizeStatsObject(stats)));
   } catch (_) {}
 }
 
@@ -1526,7 +1580,9 @@ function loadPokedex() {
     const raw = localStorage.getItem(STORAGE_KEYS.POKEDEX);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object") return parsed;
+      if (parsed && typeof parsed === "object") {
+        return sanitizePokedexMap(parsed);
+      }
     }
   } catch (_) {}
   return {};
@@ -1534,12 +1590,13 @@ function loadPokedex() {
 
 function savePokedex() {
   try {
+    state.pokedex = sanitizePokedexMap(state.pokedex);
     localStorage.setItem(STORAGE_KEYS.POKEDEX, JSON.stringify(state.pokedex));
   } catch (_) {}
 }
 
 function unlockMovieInPokedex(movieName, usedHint = false, dateStr = state.todayStr) {
-  if (!movieName) return;
+  if (!movieName || !dateStr || dateStr < COLLECTION_START_DATE) return;
   const existing = state.pokedex[movieName];
   if (!existing) {
     state.pokedex[movieName] = {
@@ -1566,7 +1623,7 @@ function syncPokedexFromProgress() {
   let changed = false;
 
   // 1. Garante que qualquer filme acertado em state.answers (memória atual de hoje) esteja com .movie preenchido e na Coleção
-  if (Array.isArray(state.answers) && state.answers.length > 0) {
+  if (state.todayStr >= COLLECTION_START_DATE && Array.isArray(state.answers) && state.answers.length > 0) {
     state.answers.forEach((ans, idx) => {
       if (!ans) return;
       const mv = getMovieFromAnswer(ans, idx, state.todayStr);
@@ -1583,61 +1640,63 @@ function syncPokedexFromProgress() {
     });
   }
 
-  // 2. Desbloqueia os filmes com resposta exata confirmada em ovavat_daily_v1
+  // 2. Desbloqueia os filmes com resposta exata confirmada em ovavat_daily_v1 (apenas a partir de COLLECTION_START_DATE)
   try {
     const rawDaily = localStorage.getItem(STORAGE_KEYS.DAILY_PROGRESS);
     if (rawDaily) {
       const dailyData = JSON.parse(rawDaily);
       const dailyDate = dailyData?.date || state.todayStr;
-      const ansList = dailyData?.answers || [];
-      ansList.forEach((ans, idx) => {
-        if (!ans || !ans.correct) return;
-        const mv = getMovieFromAnswer(ans, idx, dailyDate);
-        if (mv && !state.pokedex[mv]) {
-          state.pokedex[mv] = {
-            unlockedAt: dailyDate,
-            usedHint: Boolean(ans.usedHint)
-          };
-          changed = true;
-        }
-      });
+      if (dailyDate >= COLLECTION_START_DATE) {
+        const ansList = dailyData?.answers || [];
+        ansList.forEach((ans, idx) => {
+          if (!ans || !ans.correct) return;
+          const mv = getMovieFromAnswer(ans, idx, dailyDate);
+          if (mv && !state.pokedex[mv]) {
+            state.pokedex[mv] = {
+              unlockedAt: dailyDate,
+              usedHint: Boolean(ans.usedHint)
+            };
+            changed = true;
+          }
+        });
 
-      // Registra também a nota confirmada desse dia no histórico por data (preservando o primeiro jogado)
-      if (dailyData?.completed && ansList.length > 0) {
-        const stats = getStats();
-        if (!stats.history || typeof stats.history !== "object") {
-          stats.history = {};
-        }
-        const dayScore = ansList.filter(a => a && a.correct).length;
-        const dayMovies = ansList
-          .map((a, i) => (a && a.correct ? getMovieFromAnswer(a, i, dailyDate) : null))
-          .filter(Boolean);
-        const dayTs = Number(dailyData.startedAt) || Date.now();
-        if (!stats.history[dailyDate]) {
-          stats.history[dailyDate] = {
-            score: dayScore,
-            startedAt: dayTs,
-            movies: dayMovies
-          };
-          saveStats(stats);
-        } else if (
-          typeof stats.history[dailyDate] === "object" &&
-          (!stats.history[dailyDate].movies || stats.history[dailyDate].movies.length === 0) &&
-          dayMovies.length > 0
-        ) {
-          stats.history[dailyDate].movies = dayMovies;
-          saveStats(stats);
+        // Registra também a nota confirmada desse dia no histórico por data (preservando o primeiro jogado)
+        if (dailyData?.completed && ansList.length > 0) {
+          const stats = getStats();
+          if (!stats.history || typeof stats.history !== "object") {
+            stats.history = {};
+          }
+          const dayScore = ansList.filter(a => a && a.correct).length;
+          const dayMovies = ansList
+            .map((a, i) => (a && a.correct ? getMovieFromAnswer(a, i, dailyDate) : null))
+            .filter(Boolean);
+          const dayTs = Number(dailyData.startedAt) || Date.now();
+          if (!stats.history[dailyDate]) {
+            stats.history[dailyDate] = {
+              score: dayScore,
+              startedAt: dayTs,
+              movies: dayMovies
+            };
+            saveStats(stats);
+          } else if (
+            typeof stats.history[dailyDate] === "object" &&
+            (!stats.history[dailyDate].movies || stats.history[dailyDate].movies.length === 0) &&
+            dayMovies.length > 0
+          ) {
+            stats.history[dailyDate].movies = dayMovies;
+            saveStats(stats);
+          }
         }
       }
     }
   } catch (_) {}
 
-  // 3. Garante que qualquer filme registrado em stats.history[dt].movies também esteja na Coleção
+  // 3. Garante que qualquer filme registrado em stats.history[dt].movies (a partir de COLLECTION_START_DATE) esteja na Coleção
   try {
     const stats = getStats();
     if (stats.history && typeof stats.history === "object") {
       for (const [dt, entry] of Object.entries(stats.history)) {
-        if (entry && Array.isArray(entry.movies)) {
+        if (dt >= COLLECTION_START_DATE && entry && Array.isArray(entry.movies)) {
           entry.movies.forEach(mv => {
             if (mv && !state.pokedex[mv]) {
               state.pokedex[mv] = {
@@ -2146,8 +2205,12 @@ async function showSummaryView() {
   const emojiStrip = document.getElementById("summary-emoji-strip");
   emojiStrip.textContent = state.answers.map(a => getAnswerEmoji(a)).join("  ");
 
-  const avgPercent = stats.played > 0
-    ? Math.round((stats.totalCorrect / (stats.played * TOTAL_PHASES)) * 100)
+  const scoredDays = stats.history
+    ? Object.keys(stats.history).filter(dt => dt >= COLLECTION_START_DATE).length
+    : 0;
+  const denomGames = scoredDays > 0 ? scoredDays : stats.played;
+  const avgPercent = denomGames > 0
+    ? Math.round((stats.totalCorrect / (denomGames * TOTAL_PHASES)) * 100)
     : 0;
 
   document.getElementById("stat-played").textContent = String(stats.played);
@@ -2193,8 +2256,12 @@ async function showSummaryView() {
 
 function renderStatsModal() {
   const stats = getStats();
-  const avgPercent = stats.played > 0
-    ? Math.round((stats.totalCorrect / (stats.played * TOTAL_PHASES)) * 100)
+  const scoredDays = stats.history
+    ? Object.keys(stats.history).filter(dt => dt >= COLLECTION_START_DATE).length
+    : 0;
+  const denomGames = scoredDays > 0 ? scoredDays : stats.played;
+  const avgPercent = denomGames > 0
+    ? Math.round((stats.totalCorrect / (denomGames * TOTAL_PHASES)) * 100)
     : 0;
 
   document.getElementById("modal-stat-played").textContent = String(stats.played);
@@ -2634,13 +2701,15 @@ function mergeCloudAndLocalData(cloudRow) {
     }
   }
 
-  // 2. Mescla o histórico por data (se o mesmo dia existir nos 2 aparelhos, vale SEMPRE o que foi jogado primeiro!)
+  // 2. Mescla o histórico por data a partir de COLLECTION_START_DATE (se o mesmo dia existir nos 2 aparelhos, vale SEMPRE o que foi jogado primeiro!)
   const localStats = getStats();
-  const cloudStats = (cloudRow.stats && typeof cloudRow.stats === "object") ? cloudRow.stats : {};
+  const cloudStats = sanitizeStatsObject(cloudRow.stats);
 
   const localHist = (localStats.history && typeof localStats.history === "object") ? localStats.history : {};
   const cloudHist = (cloudStats.history && typeof cloudStats.history === "object") ? cloudStats.history : {};
-  const allHistDates = new Set([...Object.keys(cloudHist), ...Object.keys(localHist)]);
+  const allHistDates = new Set(
+    [...Object.keys(cloudHist), ...Object.keys(localHist)].filter(dt => dt >= COLLECTION_START_DATE)
+  );
   const mergedHistory = {};
   const forbiddenPastMovies = new Set();
 
@@ -2668,8 +2737,9 @@ function mergeCloudAndLocalData(cloudRow) {
     }
   }
 
-  // 3. Mescla a Coleção de DVDs (removendo eventuais filmes que só tenham sido acertados numa 2ª tentativa do mesmo dia)
-  const cloudPokedex = (cloudRow.pokedex && typeof cloudRow.pokedex === "object") ? cloudRow.pokedex : {};
+  // 3. Mescla a Coleção de DVDs (removendo DVDs anteriores a COLLECTION_START_DATE e filmes de 2ª tentativa do mesmo dia)
+  state.pokedex = sanitizePokedexMap(state.pokedex);
+  const cloudPokedex = sanitizePokedexMap(cloudRow.pokedex);
   for (const [mv, info] of Object.entries(cloudPokedex)) {
     if (forbiddenTodayMovies.has(mv) || forbiddenPastMovies.has(mv)) continue;
     if (!state.pokedex[mv]) {
@@ -2683,7 +2753,7 @@ function mergeCloudAndLocalData(cloudRow) {
   }
   savePokedex();
 
-  // 4. Recalcula as estatísticas gerais com base no histórico vencedor de cada dia
+  // 4. Recalcula as estatísticas gerais (apenas datas >= COLLECTION_START_DATE contam para acertos/distribuição; dias anteriores valem apenas para streak)
   const histDates = Object.keys(mergedHistory).sort();
   const histPlayed = histDates.length;
   const histTotalCorrect = histDates.reduce((acc, dt) => acc + (mergedHistory[dt].score || 0), 0);
@@ -2702,16 +2772,6 @@ function mergeCloudAndLocalData(cloudRow) {
     }
     if (histStreak > histMaxStreak) histMaxStreak = histStreak;
     prevDate = dt;
-  }
-
-  const mergedDist = [0, 0, 0, 0, 0, 0];
-  for (let i = 0; i < 6; i++) {
-    mergedDist[i] = histPlayed > 0
-      ? Math.max(histDist[i], (cloudStats.distribution && cloudStats.distribution[i]) || 0)
-      : Math.max(
-          (localStats.distribution && localStats.distribution[i]) || 0,
-          (cloudStats.distribution && cloudStats.distribution[i]) || 0
-        );
   }
 
   const localLast = localStats.lastCompletedDate || "";
@@ -2735,20 +2795,12 @@ function mergeCloudAndLocalData(cloudRow) {
   }
 
   const mergedStats = {
-    played: histPlayed > 0
-      ? Math.max(histPlayed, cloudStats.played || 0)
-      : Math.max(localStats.played || 0, cloudStats.played || 0),
-    totalCorrect: histPlayed > 0
-      ? Math.max(histTotalCorrect, Object.keys(state.pokedex).length)
-      : Math.max(
-          localStats.totalCorrect || 0,
-          cloudStats.totalCorrect || 0,
-          Object.keys(state.pokedex).length
-        ),
+    played: Math.max(histPlayed, localStats.played || 0, cloudStats.played || 0, bestStreak),
+    totalCorrect: histPlayed > 0 ? histTotalCorrect : Object.keys(state.pokedex).length,
     currentStreak: bestStreak,
     maxStreak: Math.max(histMaxStreak, localStats.maxStreak || 0, cloudStats.maxStreak || 0, bestStreak),
     lastCompletedDate: bestLastDate,
-    distribution: mergedDist,
+    distribution: histDist,
     history: mergedHistory
   };
   saveStats(mergedStats);
@@ -3025,12 +3077,13 @@ async function loadLeaderboardFromCloud() {
     }
 
     const parsed = rows.map(r => {
-      const st = r.stats || {};
-      const pk = r.pokedex || {};
+      const st = sanitizeStatsObject(r.stats);
+      const pk = sanitizePokedexMap(r.pokedex);
       const dvds = Object.keys(pk).length;
-      const totalCorrect = Math.max(st.totalCorrect || 0, dvds);
+      const validHistCount = st.history ? Object.keys(st.history).length : 0;
+      const totalCorrect = validHistCount > 0 ? st.totalCorrect : dvds;
       const streak = st.currentStreak || 0;
-      const played = st.played || 0;
+      const played = Math.max(st.played || 0, streak, validHistCount);
       return {
         username: r.username,
         displayName: r.display_name || r.username,
@@ -3044,7 +3097,7 @@ async function loadLeaderboardFromCloud() {
     parsed.sort((a, b) => {
       if (b.totalCorrect !== a.totalCorrect) return b.totalCorrect - a.totalCorrect;
       if (b.streak !== a.streak) return b.streak - a.streak;
-      return b.dvds - a.dvds;
+      return b.played - a.played;
     });
 
     listEl.innerHTML = "";
@@ -3057,7 +3110,7 @@ async function loadLeaderboardFromCloud() {
         <span class="leaderboard-rank">${rankBadge}</span>
         <div class="leaderboard-user">
           <span class="leaderboard-name">${escapeHtml(p.displayName)}</span>
-          <span class="leaderboard-sub">${p.dvds} DVDs • ${p.played} ${p.played === 1 ? "jogo" : "jogos"}</span>
+          <span class="leaderboard-sub">${p.played} ${p.played === 1 ? "jogo" : "jogos"}</span>
         </div>
         <div class="leaderboard-badges">
           <span class="leaderboard-pill">🔥 ${p.streak}</span>

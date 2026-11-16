@@ -1779,7 +1779,7 @@ html, body {
    ============================================================================ */
 .liquid-glass-nav {
   position: fixed;
-  bottom: 16px;
+  bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
   width: calc(100% - 64px);
@@ -2008,6 +2008,7 @@ html, body {
 
 .pokedex-title-row {
   width: 100%;
+  min-height: 30px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2015,16 +2016,20 @@ html, body {
 }
 
 .pokedex-title {
-  font-size: 1.4rem;
+  font-size: 1.32rem;
   font-weight: 800;
   letter-spacing: -0.03em;
-  line-height: 1.1;
+  line-height: 1.15;
   color: var(--text-primary);
   margin: 0;
 }
 
 .pokedex-counter-pill {
-  padding: 6px 13px;
+  height: 30px;
+  padding: 0 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 999px;
   background: var(--accent-tint);
   border: 1px solid var(--accent-border);
@@ -2032,6 +2037,7 @@ html, body {
   font-size: 0.84rem;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
 }
 
 .pokedex-bar-track {
@@ -2415,7 +2421,7 @@ html, body {
    PERFIL DO JOGADOR & SINCRONIZAÇÃO MULTI-APARELHOS (SUPABASE CLOUD SAVE)
    ============================================================================ */
 .profile-card {
-  padding: 20px 18px;
+  padding: 18px;
   display: flex;
   flex-direction: column;
   gap: 15px;
@@ -2624,16 +2630,18 @@ html, body {
 
 /* Badge de usuário conectado no topo do card de Ranking */
 .profile-connected-pill {
+  height: 30px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 11px;
+  padding: 0 11px;
   border-radius: 999px;
   background: var(--bg-secondary);
   border: 0.5px solid var(--separator);
   font-size: 0.75rem;
   font-weight: 700;
   color: var(--text-secondary);
+  flex-shrink: 0;
 }
 
 .profile-connected-dot {
@@ -2668,10 +2676,10 @@ html, body {
 }
 
 .profile-section-title {
-  font-size: 1.22rem;
+  font-size: 1.32rem;
   font-weight: 800;
-  letter-spacing: -0.025em;
-  line-height: 1.1;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
   color: var(--text-primary);
   margin: 0;
 }
