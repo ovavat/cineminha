@@ -2644,6 +2644,7 @@ function openPokedexDvdModal(movieName, numStr) {
   const sheetEl = modal ? modal.querySelector(".pokedex-dvd-sheet") : null;
   const numEl = document.getElementById("pokedex-modal-num");
   const titleEl = document.getElementById("pokedex-modal-title");
+  const hintEl = document.getElementById("pokedex-modal-hint");
   const imgEl = document.getElementById("pokedex-inspect-img");
   const reviewsEl = document.getElementById("pokedex-modal-reviews");
   if (!modal) return;
@@ -2656,6 +2657,18 @@ function openPokedexDvdModal(movieName, numStr) {
     numEl.textContent = isShiny ? `✨ ${numStr} • Raro` : numStr;
   }
   if (titleEl) titleEl.textContent = movieName;
+  if (hintEl) {
+    const unlockedInfo = state.pokedex[movieName];
+    const isoDate = unlockedInfo && unlockedInfo.unlockedAt ? String(unlockedInfo.unlockedAt) : "";
+    const dateMatch = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateMatch) {
+      hintEl.textContent = `Adquirido em ${dateMatch[3]}/${dateMatch[2]}/${dateMatch[1]}`;
+    } else if (unlockedInfo) {
+      hintEl.textContent = "Adquirido na coleção";
+    } else {
+      hintEl.textContent = "Ainda não adquirido (modo vitrine)";
+    }
+  }
   if (imgEl) {
     imgEl.src = "assets/icon.jpg";
     resolveMoviePoster(movieName).then(url => {
