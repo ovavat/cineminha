@@ -2112,8 +2112,15 @@ html, body {
   transform: scale(0.96);
 }
 
+.pokedex-slot-top {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 18px;
+}
+
 .pokedex-num-badge {
-  align-self: flex-start;
   font-size: 0.64rem;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
@@ -2127,6 +2134,105 @@ html, body {
 .pokedex-slot.unlocked .pokedex-num-badge {
   color: var(--accent);
   background: var(--accent-tint);
+}
+
+/* Filmes Raros / Shiny (Nota média > 8 na planilha) */
+@keyframes shinyFoilSweep {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes shinySparklePulse {
+  0%, 100% {
+    transform: scale(1) rotate(0deg);
+    filter: drop-shadow(0 0 4px rgba(255, 196, 0, 0.7));
+  }
+  50% {
+    transform: scale(1.16) rotate(10deg);
+    filter: drop-shadow(0 0 8px rgba(255, 215, 0, 0.95));
+  }
+}
+
+.pokedex-slot.unlocked.shiny {
+  background:
+    radial-gradient(circle at 50% 36%, rgba(255, 214, 70, 0.24) 0%, transparent 66%),
+    linear-gradient(
+      135deg,
+      rgba(255, 249, 224, 0.96) 0%,
+      rgba(255, 236, 179, 0.72) 45%,
+      rgba(252, 232, 255, 0.85) 100%
+    );
+  background-size: 200% 200%;
+  animation: shinyFoilSweep 6s ease infinite;
+  border: 1.5px solid rgba(245, 179, 1, 0.65);
+  box-shadow:
+    0 8px 22px -4px rgba(245, 179, 1, 0.28),
+    0 0 0 1px rgba(255, 215, 64, 0.25),
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.9);
+  overflow: hidden;
+}
+
+[data-theme="dark"] .pokedex-slot.unlocked.shiny {
+  background:
+    radial-gradient(circle at 50% 36%, rgba(255, 200, 40, 0.22) 0%, transparent 68%),
+    linear-gradient(
+      135deg,
+      rgba(56, 44, 18, 0.95) 0%,
+      rgba(74, 52, 20, 0.82) 48%,
+      rgba(58, 30, 68, 0.9) 100%
+    );
+  background-size: 200% 200%;
+  border-color: rgba(255, 200, 45, 0.62);
+  box-shadow:
+    0 10px 26px -4px rgba(255, 188, 15, 0.3),
+    inset 0 1px 1px rgba(255, 230, 140, 0.35);
+}
+
+.pokedex-slot.unlocked.shiny .pokedex-num-badge {
+  background: linear-gradient(135deg, #FFB800 0%, #F59E0B 100%);
+  color: #FFFFFF;
+  box-shadow: 0 2px 6px rgba(245, 158, 11, 0.35);
+}
+
+.pokedex-shiny-badge {
+  font-size: 0.76rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  animation: shinySparklePulse 2.4s ease-in-out infinite;
+}
+
+.pokedex-slot.unlocked.shiny .pokedex-mini-front {
+  border-color: rgba(255, 215, 64, 0.6);
+  box-shadow:
+    0 6px 16px rgba(245, 158, 11, 0.32),
+    0 0 10px rgba(255, 208, 40, 0.28);
+}
+
+.pokedex-slot.unlocked.shiny .pokedex-mini-lip {
+  background: linear-gradient(90deg, #523808 0%, #855b0d 50%, #4a3206 100%);
+}
+
+.pokedex-slot.unlocked.shiny .pokedex-mini-lip span {
+  color: #FFE082;
+}
+
+.pokedex-slot.unlocked.shiny .pokedex-mini-glare {
+  background: linear-gradient(
+    120deg,
+    transparent 20%,
+    rgba(255, 235, 130, 0.32) 44%,
+    rgba(255, 255, 255, 0.4) 50%,
+    transparent 65%
+  );
 }
 
 /* Mini Palco 3D para cada DVD Descoberto na Grade */
@@ -2352,6 +2458,17 @@ html, body {
   margin-top: 6px;
 }
 
+.eyebrow-badge.shiny-eyebrow {
+  background: linear-gradient(135deg, rgba(255, 184, 0, 0.2) 0%, rgba(245, 158, 11, 0.28) 100%);
+  color: #D97706;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+}
+
+[data-theme="dark"] .eyebrow-badge.shiny-eyebrow {
+  color: #FBBF24;
+  border-color: rgba(251, 191, 36, 0.45);
+}
+
 .pokedex-rating-box {
   width: 100%;
   background: var(--bg-secondary);
@@ -2361,6 +2478,14 @@ html, body {
   flex-direction: column;
   align-items: center;
   gap: 6px;
+}
+
+.pokedex-rating-box.is-shiny {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 204, 0, 0.18) 0%, transparent 70%),
+    var(--bg-secondary);
+  border: 1px solid rgba(245, 158, 11, 0.42);
+  box-shadow: 0 6px 20px -4px rgba(245, 158, 11, 0.18);
 }
 
 .pokedex-stars-row {

@@ -41,6 +41,8 @@ const state = {
   dailyStartedAt: 0,   // Timestamp (ms) de quando a 1ª resposta do dia foi dada (garante que o 1º jogo do dia prevaleça)
   activeTab: "game",
   pokedexFilter: "all",
+  pokedexPreviewAll: false,
+  pokedexTodosClicks: 0,
   pokedex: {},         // Mapa { [movieName]: { unlockedAt, usedHint } }
   profileSession: null, // { username, displayName, pinHash }
   authMode: "login",   // "login" | "register"
@@ -2304,6 +2306,9 @@ function showToast(msg) {
 // ============================================================================
 
 function switchMainTab(tabName) {
+  // Ao trocar de aba, desativa a visualização temporária de todos os DVDs (easter egg 10x em "Todos")
+  state.pokedexPreviewAll = false;
+  state.pokedexTodosClicks = 0;
   state.activeTab = tabName;
   const glider = document.getElementById("liquid-glass-glider");
   const btnGame = document.getElementById("nav-tab-game");
@@ -2383,6 +2388,11 @@ function getMovieTitle(movieEntry) {
   return typeof movieEntry === "string" ? movieEntry : String(movieEntry.title || "");
 }
 
+function isMovieShiny(movieName) {
+  const movieObj = state.allMovies.find(m => getMovieTitle(m) === movieName);
+  return Boolean(movieObj && typeof movieObj.avgRating === "number" && movieObj.avgRating > 8);
+}
+
 function renderPokedexView() {
   syncPokedexFromProgress();
 
@@ -2393,7 +2403,8 @@ function renderPokedexView() {
 
   const movieTitles = state.allMovies.map(getMovieTitle).filter(Boolean);
   const totalMovies = movieTitles.length;
-  const unlockedCount = movieTitles.filter(title => Boolean(state.pokedex[title])).length;
+  const realUnlockedCount = movieTitles.filter(title => Boolean(state.pokedex[title])).length;
+  const unlockedCount = state.pokedexPreviewAll ? totalMovies : realUnlockedCount;
   const pct = totalMovies > 0 ? Math.round((unlockedCount / totalMovies) * 100) : 0;
 
   if (countBadge) {
@@ -2409,7 +2420,7 @@ function renderPokedexView() {
   const entries = movieTitles.map((movieName, idx) => ({
     movieName,
     idx,
-    isUnlocked: Boolean(state.pokedex[movieName])
+    isUnlocked: Boolean(state.pokedex[movieName]) || Boolean(state.pokedexPreviewAll)
   }));
 
   entries.sort((a, b) => {
@@ -2422,13 +2433,17 @@ function renderPokedexView() {
     if (state.pokedexFilter === "locked" && isUnlocked) return;
 
     const numStr = `#${String(idx + 1).padStart(3, "0")}`;
+    const isShiny = isUnlocked && isMovieShiny(movieName);
     const slot = document.createElement("div");
-    slot.className = `pokedex-slot ${isUnlocked ? "unlocked" : "locked"}`;
+    slot.className = `pokedex-slot ${isUnlocked ? "unlocked" : "locked"}${isShiny ? " shiny" : ""}`;
 
     if (isUnlocked) {
       const imgId = `pokedex-img-${idx}`;
       slot.innerHTML = `
-        <span class="pokedex-num-badge">${numStr}</span>
+        <div class="pokedex-slot-top">
+          <span class="pokedex-num-badge">${numStr}</span>
+          ${isShiny ? `<span class="pokedex-shiny-badge" title="Filme Raro • Nota > 8">✨</span>` : ""}
+        </div>
         <div class="pokedex-mini-stage">
           <div class="pokedex-mini-dvd">
             <div class="pokedex-mini-spine"><span>DVD</span></div>
@@ -2457,7 +2472,9 @@ function renderPokedexView() {
     } else {
       // Ainda não descoberto: esconde o pôster e o nome do filme (estilo Pokémon GO)
       slot.innerHTML = `
-        <span class="pokedex-num-badge">${numStr}</span>
+        <div class="pokedex-slot-top">
+          <span class="pokedex-num-badge">${numStr}</span>
+        </div>
         <div class="pokedex-mystery-box" aria-label="Filme ainda não descoberto">
           <span class="pokedex-mystery-icon">?</span>
         </div>
@@ -2506,13 +2523,20 @@ function buildStarsSvgHtml(starsOutOf5) {
 
 function openPokedexDvdModal(movieName, numStr) {
   const modal = document.getElementById("modal-pokedex-dvd");
+  const sheetEl = modal ? modal.querySelector(".pokedex-dvd-sheet") : null;
   const numEl = document.getElementById("pokedex-modal-num");
   const titleEl = document.getElementById("pokedex-modal-title");
   const imgEl = document.getElementById("pokedex-inspect-img");
   const reviewsEl = document.getElementById("pokedex-modal-reviews");
   if (!modal) return;
 
-  if (numEl) numEl.textContent = numStr;
+  const isShiny = isMovieShiny(movieName);
+  sheetEl?.classList.toggle("is-shiny", isShiny);
+
+  if (numEl) {
+    numEl.className = `eyebrow-badge${isShiny ? " shiny-eyebrow" : ""}`;
+    numEl.textContent = isShiny ? `✨ ${numStr} • Raro` : numStr;
+  }
   if (titleEl) titleEl.textContent = movieName;
   if (imgEl) {
     imgEl.src = "assets/icon.jpg";
@@ -2532,7 +2556,7 @@ function openPokedexDvdModal(movieName, numStr) {
       const avgFormatted = avg.toFixed(2).replace(".", ",");
       const starsFormatted = String(stars).replace(".", ",");
       reviewsEl.innerHTML = `
-        <div class="pokedex-rating-box">
+        <div class="pokedex-rating-box${isShiny ? " is-shiny" : ""}">
           <div class="pokedex-stars-row" aria-label="${starsFormatted} de 5 estrelas">
             ${buildStarsSvgHtml(stars)}
           </div>
@@ -3388,12 +3412,25 @@ function bindEvents() {
     }
   });
 
-  // Filtros da Coleção
+  // Filtros da Coleção (com Easter Egg: clicar 10x seguidas em "Todos" revela todos os filmes visualmente até trocar de aba)
   document.querySelectorAll("#pokedex-view .pokedex-filter-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       document.querySelectorAll("#pokedex-view .pokedex-filter-btn").forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
-      state.pokedexFilter = btn.getAttribute("data-filter") || "all";
+      const filter = btn.getAttribute("data-filter") || "all";
+      state.pokedexFilter = filter;
+
+      if (filter === "all") {
+        state.pokedexTodosClicks = (state.pokedexTodosClicks || 0) + 1;
+        if (state.pokedexTodosClicks >= 10) {
+          state.pokedexTodosClicks = 0;
+          state.pokedexPreviewAll = true;
+          showToast("✨ Modo Vitrine: todos os DVDs visíveis!");
+        }
+      } else {
+        state.pokedexTodosClicks = 0;
+      }
+
       renderPokedexView();
     });
   });
