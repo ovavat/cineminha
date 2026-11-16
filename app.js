@@ -8,8 +8,8 @@ const GVIZ_JSON_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/t
 const GVIZ_JSONP_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=responseHandler:__ovavatSheetCallback`;
 
 const TOTAL_PHASES = 5;
-const LAUNCH_DATE_STR = "2026-11-13"; // Dia #1 do Cineminha do Ovavat
-const COLLECTION_START_DATE = "2026-11-15"; // Só considera filmes/acertos/DVDs a partir desta data (dias anteriores contam apenas para streak)
+const LAUNCH_DATE_STR = "2026-11-15"; // Desafio #1 oficial do Cineminha do Ovavat (histórico do beta anterior removido)
+const COLLECTION_START_DATE = "2026-11-15"; // Só considera partidas/filmes/acertos/streak a partir do Desafio #1
 
 const SUPABASE_URL = "https://riyvxpgyouxyljhfqknj.supabase.co";
 const SUPABASE_KEY = "sb_publishable_QkT0GDOivwCnfeBfVQ6nJw_e-CoJ_ic";
@@ -1449,23 +1449,46 @@ function sanitizeStatsObject(rawStats) {
   const validDates = Object.keys(cleanHist).sort();
   let totalCorrect = 0;
   const dist = [0, 0, 0, 0, 0, 0];
+  let histStreak = 0;
+  let histMaxStreak = 0;
+  let prevDate = null;
 
   for (const dt of validDates) {
     const sc = Math.min(5, Math.max(0, Number(cleanHist[dt].score) || 0));
     totalCorrect += sc;
     dist[sc] = (dist[sc] || 0) + 1;
+
+    if (prevDate && getYesterdayIso(dt) === prevDate) {
+      histStreak += 1;
+    } else {
+      histStreak = 1;
+    }
+    if (histStreak > histMaxStreak) {
+      histMaxStreak = histStreak;
+    }
+    prevDate = dt;
   }
 
-  const currentStreak = Math.max(0, Number(st.currentStreak) || 0);
-  const maxStreak = Math.max(currentStreak, Number(st.maxStreak) || 0);
-  const played = Math.max(validDates.length, currentStreak, Number(st.played) || 0);
+  const lastCompletedDate = validDates.length > 0 ? validDates[validDates.length - 1] : null;
+  const refToday = state.todayStr || getBrazilDateParts().iso;
+  const refYesterday = getYesterdayIso(refToday);
+
+  // Se a pessoa não jogou nem hoje nem ontem, a streak foi perdida e zera (0) nela e no ranking!
+  const isStreakAlive = Boolean(
+    lastCompletedDate &&
+    (lastCompletedDate === refToday || lastCompletedDate === refYesterday)
+  );
+
+  const currentStreak = isStreakAlive ? histStreak : 0;
+  const maxStreak = histMaxStreak;
+  const played = validDates.length;
 
   return {
     played,
     totalCorrect,
     currentStreak,
     maxStreak,
-    lastCompletedDate: st.lastCompletedDate || (validDates[validDates.length - 1] || null),
+    lastCompletedDate,
     distribution: dist,
     history: cleanHist
   };
@@ -1741,17 +1764,7 @@ function resetDailyGameForTesting() {
 
 function updateHeaderStats() {
   const stats = getStats();
-  const yesterdayIso = getYesterdayIso(state.todayStr);
-  let activeStreak = stats.currentStreak;
-  if (
-    stats.lastCompletedDate &&
-    stats.lastCompletedDate !== state.todayStr &&
-    stats.lastCompletedDate !== yesterdayIso
-  ) {
-    activeStreak = 0;
-  }
-
-  document.getElementById("header-streak").textContent = String(activeStreak);
+  document.getElementById("header-streak").textContent = String(stats.currentStreak);
   document.getElementById("edition-badge").textContent = `Desafio #${state.editionNumber}`;
   document.getElementById("header-date").textContent = state.displayDateStr;
 }
@@ -2777,56 +2790,10 @@ function mergeCloudAndLocalData(cloudRow) {
   }
   savePokedex();
 
-  // 4. Recalcula as estatísticas gerais (apenas datas >= COLLECTION_START_DATE contam para acertos/distribuição; dias anteriores valem apenas para streak)
-  const histDates = Object.keys(mergedHistory).sort();
-  const histPlayed = histDates.length;
-  const histTotalCorrect = histDates.reduce((acc, dt) => acc + (mergedHistory[dt].score || 0), 0);
-
-  let histStreak = 0;
-  let histMaxStreak = 0;
-  const histDist = [0, 0, 0, 0, 0, 0];
-  let prevDate = null;
-  for (const dt of histDates) {
-    const sc = Math.min(5, Math.max(0, mergedHistory[dt].score || 0));
-    histDist[sc] = (histDist[sc] || 0) + 1;
-    if (prevDate && getYesterdayIso(dt) === prevDate) {
-      histStreak += 1;
-    } else {
-      histStreak = 1;
-    }
-    if (histStreak > histMaxStreak) histMaxStreak = histStreak;
-    prevDate = dt;
-  }
-
-  const localLast = localStats.lastCompletedDate || "";
-  const cloudLast = cloudStats.lastCompletedDate || "";
-  const histLast = histDates[histDates.length - 1] || "";
-  const bestLastDate = [localLast, cloudLast, histLast].sort().pop() || null;
-
-  let bestStreak = histStreak;
-  if (cloudLast >= localLast && (cloudStats.currentStreak || 0) > bestStreak) {
-    bestStreak = cloudStats.currentStreak || 0;
-  }
-  if (localLast >= cloudLast && (localStats.currentStreak || 0) > bestStreak) {
-    bestStreak = localStats.currentStreak || 0;
-  }
-  if (localLast && cloudLast && localLast !== cloudLast) {
-    if (getYesterdayIso(localLast) === cloudLast) {
-      bestStreak = Math.max(bestStreak, (cloudStats.currentStreak || 1) + 1);
-    } else if (getYesterdayIso(cloudLast) === localLast) {
-      bestStreak = Math.max(bestStreak, (localStats.currentStreak || 1) + 1);
-    }
-  }
-
-  const mergedStats = {
-    played: Math.max(histPlayed, localStats.played || 0, cloudStats.played || 0, bestStreak),
-    totalCorrect: histPlayed > 0 ? histTotalCorrect : Object.keys(state.pokedex).length,
-    currentStreak: bestStreak,
-    maxStreak: Math.max(histMaxStreak, localStats.maxStreak || 0, cloudStats.maxStreak || 0, bestStreak),
-    lastCompletedDate: bestLastDate,
-    distribution: histDist,
+  // 4. Recalcula as estatísticas gerais exclusivamente a partir do Desafio #1 (COLLECTION_START_DATE)
+  const mergedStats = sanitizeStatsObject({
     history: mergedHistory
-  };
+  });
   saveStats(mergedStats);
 
   syncPokedexFromProgress();
@@ -3107,21 +3074,17 @@ async function loadLeaderboardFromCloud() {
       const validHistCount = st.history ? Object.keys(st.history).length : 0;
       const totalCorrect = validHistCount > 0 ? st.totalCorrect : dvds;
       const streak = st.currentStreak || 0;
-      const played = Math.max(st.played || 0, streak, validHistCount);
       return {
         username: r.username,
         displayName: r.display_name || r.username,
         streak,
-        totalCorrect,
-        dvds,
-        played
+        totalCorrect
       };
     });
 
     parsed.sort((a, b) => {
       if (b.totalCorrect !== a.totalCorrect) return b.totalCorrect - a.totalCorrect;
-      if (b.streak !== a.streak) return b.streak - a.streak;
-      return b.played - a.played;
+      return b.streak - a.streak;
     });
 
     listEl.innerHTML = "";
@@ -3134,11 +3097,10 @@ async function loadLeaderboardFromCloud() {
         <span class="leaderboard-rank">${rankBadge}</span>
         <div class="leaderboard-user">
           <span class="leaderboard-name">${escapeHtml(p.displayName)}</span>
-          <span class="leaderboard-sub">${p.played} ${p.played === 1 ? "jogo" : "jogos"}</span>
+          <span class="leaderboard-streak-badge" title="Streak ativa">🔥 ${p.streak}</span>
         </div>
         <div class="leaderboard-badges">
-          <span class="leaderboard-pill">🔥 ${p.streak}</span>
-          <span class="leaderboard-pill">🎯 ${p.totalCorrect}</span>
+          <span class="leaderboard-score-pill">🎯 ${p.totalCorrect}</span>
         </div>
       `;
       listEl.appendChild(row);
@@ -3488,6 +3450,7 @@ async function initApp() {
   }
 
   syncPokedexFromProgress();
+  updateHeaderStats();
 
   // Carrega sessão do Perfil e sincroniza na nuvem com o Supabase automaticamente
   state.profileSession = loadProfileSession();
