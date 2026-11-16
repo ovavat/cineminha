@@ -19,7 +19,7 @@ const STORAGE_KEYS = {
   DAILY_PROGRESS: "ovavat_daily_v1",
   POKEDEX: "ovavat_pokedex_v2",
   PROFILE_SESSION: "ovavat_profile_session_v1",
-  SHEET_CACHE: "ovavat_sheet_cache_v2",
+  SHEET_CACHE: "ovavat_sheet_cache_v3",
   POSTER_CACHE: "ovavat_poster_cache_v9_wikidata_ptbr",
   THEME: "ovavat_theme_v2_light",
   PWA_DISMISSED_DATE: "ovavat_pwa_dismissed_v1"
@@ -425,6 +425,21 @@ function parseBrDateToIso(dateFormatted) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function parseBrDateTimeMs(dateFormatted) {
+  if (!dateFormatted) return Infinity;
+  const match = String(dateFormatted).match(/(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (!match) return Infinity;
+  const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"] = match;
+  return Date.UTC(
+    Number(yyyy),
+    Number(mm) - 1,
+    Number(dd),
+    Number(hh),
+    Number(min),
+    Number(ss)
+  );
+}
+
 function cyrb32(str) {
   let h1 = 1779033703, h2 = 3144134277, h3 = 1013904242, h4 = 2773480762;
   for (let i = 0, k; i < str.length; i++) {
@@ -467,7 +482,7 @@ function seededShuffle(array, rng) {
 function parseGvizTable(table) {
   const rows = (table && table.rows) || [];
   const validReviews = [];
-  const movieFirstDate = new Map();
+  const movieFirstMeta = new Map();
   const movieScores = new Map();
 
   for (let i = 0; i < rows.length; i++) {
@@ -480,8 +495,14 @@ function parseGvizTable(table) {
 
     if (!movie) continue;
     const rowIso = parseBrDateToIso(dateFormatted);
-    if (!movieFirstDate.has(movie) || (rowIso && rowIso < movieFirstDate.get(movie))) {
-      movieFirstDate.set(movie, rowIso);
+    const rowTs = parseBrDateTimeMs(dateFormatted);
+    const prevMeta = movieFirstMeta.get(movie);
+    if (!prevMeta || rowTs < prevMeta.firstTs) {
+      movieFirstMeta.set(movie, {
+        firstIso: rowIso || (prevMeta ? prevMeta.firstIso : ""),
+        firstTs: rowTs,
+        firstRowIdx: prevMeta ? Math.min(prevMeta.firstRowIdx, i) : i
+      });
     }
 
     // Coluna C (c[2]): Nota de 0 a 10 dada para o filme
@@ -520,13 +541,23 @@ function parseGvizTable(table) {
     });
   }
 
-  const movies = Array.from(movieFirstDate.entries())
-    .sort((a, b) => a[0].localeCompare(b[0], "pt-BR"))
-    .map(([title, firstIso]) => {
+  // Ordena e numera os filmes pela data/hora em que a primeira review foi adicionada (#001 = mais antigo)
+  const movies = Array.from(movieFirstMeta.entries())
+    .sort((a, b) => {
+      if (a[1].firstTs !== b[1].firstTs) return a[1].firstTs - b[1].firstTs;
+      return a[1].firstRowIdx - b[1].firstRowIdx;
+    })
+    .map(([title, meta]) => {
       const sc = movieScores.get(title);
       const avgRating = sc && sc.count > 0 ? sc.sum / sc.count : null;
       const ratingCount = sc ? sc.count : 0;
-      return { title, firstIso, avgRating, ratingCount };
+      return {
+        title,
+        firstIso: meta.firstIso,
+        firstTs: meta.firstTs,
+        avgRating,
+        ratingCount
+      };
     });
 
   return {
@@ -752,29 +783,6 @@ function buildDailyChallenge(reviews, allMovies, dateIso) {
 
   const pool = eligibleReviews.length >= TOTAL_PHASES ? eligibleReviews : reviews;
   const seedKey = `cineminha-ovavat-${dateIso}`;
-  const rng = mulberry32(cyrb32(seedKey));
-
-  const shuffledReviews = seededShuffle(pool, rng);
-
-  const selectedReviews = [];
-  const usedMoviesToday = new Set();
-
-  for (const rev of shuffledReviews) {
-    if (!usedMoviesToday.has(rev.movie)) {
-      usedMoviesToday.add(rev.movie);
-      selectedReviews.push(rev);
-      if (selectedReviews.length === TOTAL_PHASES) break;
-    }
-  }
-
-  if (selectedReviews.length < TOTAL_PHASES) {
-    for (const rev of shuffledReviews) {
-      if (!selectedReviews.includes(rev)) {
-        selectedReviews.push(rev);
-        if (selectedReviews.length === TOTAL_PHASES) break;
-      }
-    }
-  }
 
   const normalizedMovies = allMovies.map(m =>
     typeof m === "string" ? { title: m, firstIso: "" } : m
@@ -786,11 +794,100 @@ function buildDailyChallenge(reviews, allMovies, dateIso) {
     ? eligibleMovieTitles
     : normalizedMovies.map(m => m.title);
 
+  // Para 16/11/2026, congela exatamente as 5 perguntas originais (e seus índices corretos) para que edições na planilha não quebrem o dia de hoje
+  if (dateIso === "2026-11-16") {
+    const pinnedSpecs = [
+      { movie: "Enaldinho e o Mistério da Lagoa", reviewPrefix: "nah they fucking", correctIdx: 1 },
+      { movie: "Hoje Eu Quero Voltar Sozinho", reviewPrefix: "gi, se a gente fosse um eclipse", correctIdx: 2 },
+      { movie: "Um Ano Inesquecível: Inverno", reviewPrefix: "Every fish in the sea", correctIdx: 2 },
+      { movie: "Abrigo Nuclear", reviewPrefix: "O fallout brasileiro eh foda", correctIdx: 0 },
+      { movie: "Quinze Dias", reviewPrefix: "🤢🤮🤮", correctIdx: 3 }
+    ];
+
+    const pinnedPhases = pinnedSpecs.map((spec, phaseIdx) => {
+      const found =
+        reviews.find(
+          r => r.movie === spec.movie && String(r.review || "").trim().startsWith(spec.reviewPrefix)
+        ) ||
+        reviews.find(r => r.movie === spec.movie) ||
+        {
+          id: phaseIdx,
+          date: "01/01/2025",
+          movie: spec.movie,
+          author: "Cineminha",
+          review: spec.reviewPrefix
+        };
+
+      const wrongPool = moviePool
+        .filter(m => m !== found.movie)
+        .sort((a, b) => cyrb32(`${seedKey}|opt|${phaseIdx}|${a}`) - cyrb32(`${seedKey}|opt|${phaseIdx}|${b}`));
+      const distractors = wrongPool.slice(0, 3);
+      const options = [];
+      let dPtr = 0;
+      for (let slot = 0; slot < 4; slot++) {
+        if (slot === spec.correctIdx) {
+          options.push(found.movie);
+        } else {
+          options.push(distractors[dPtr++] || found.movie);
+        }
+      }
+
+      const extraRng = mulberry32(cyrb32(`${seedKey}-extra-reviews-${phaseIdx}-${found.movie}`));
+      const sameMovieOthers = pool.filter(
+        r => r.movie === found.movie && r.review.trim() !== found.review.trim()
+      );
+      const extraReviews = seededShuffle(sameMovieOthers, extraRng).slice(0, 1);
+
+      return {
+        reviewObj: found,
+        extraReviews,
+        options,
+        correctIndex: spec.correctIdx
+      };
+    });
+
+    return pinnedPhases;
+  }
+
+  // Para os próximos dias: cada review recebe um hash próprio independente da posição no array,
+  // evitando que adicionar filmes antigos na planilha embaralhe todo o sorteio do dia!
+  const rankedReviews = pool
+    .slice()
+    .sort((a, b) => {
+      const ha = cyrb32(`${seedKey}|rev|${a.movie}|${a.author}|${a.review}`);
+      const hb = cyrb32(`${seedKey}|rev|${b.movie}|${b.author}|${b.review}`);
+      if (ha !== hb) return ha - hb;
+      return a.movie.localeCompare(b.movie);
+    });
+
+  const selectedReviews = [];
+  const usedMoviesToday = new Set();
+
+  for (const rev of rankedReviews) {
+    if (!usedMoviesToday.has(rev.movie)) {
+      usedMoviesToday.add(rev.movie);
+      selectedReviews.push(rev);
+      if (selectedReviews.length === TOTAL_PHASES) break;
+    }
+  }
+
+  if (selectedReviews.length < TOTAL_PHASES) {
+    for (const rev of rankedReviews) {
+      if (!selectedReviews.includes(rev)) {
+        selectedReviews.push(rev);
+        if (selectedReviews.length === TOTAL_PHASES) break;
+      }
+    }
+  }
+
   return selectedReviews.map((reviewObj, phaseIdx) => {
-    const phaseRng = mulberry32(cyrb32(`${seedKey}-phase-${phaseIdx}-${reviewObj.movie}`));
-    const wrongPool = moviePool.filter(m => m !== reviewObj.movie);
-    const distractors = seededShuffle(wrongPool, phaseRng).slice(0, 3);
-    const options = seededShuffle([reviewObj.movie, ...distractors], phaseRng);
+    const wrongPool = moviePool
+      .filter(m => m !== reviewObj.movie)
+      .sort((a, b) => cyrb32(`${seedKey}|opt|${phaseIdx}|${a}`) - cyrb32(`${seedKey}|opt|${phaseIdx}|${b}`));
+    const distractors = wrongPool.slice(0, 3);
+    const options = [reviewObj.movie, ...distractors].sort(
+      (a, b) => cyrb32(`${seedKey}|slot|${phaseIdx}|${a}`) - cyrb32(`${seedKey}|slot|${phaseIdx}|${b}`)
+    );
     const correctIndex = options.indexOf(reviewObj.movie);
 
     // Apenas 1 review extra do mesmo filme (sorteada de forma determinística para todos no dia)
@@ -1874,9 +1971,11 @@ function renderCurrentPhase() {
   }
 
   const reviewTextEl = document.getElementById("review-text");
+  const displayedReview = existingAnswer && existingAnswer.review ? existingAnswer.review : activeReviewObj.review;
+  const displayedMovieForRedaction = existingAnswer && existingAnswer.movie ? existingAnswer.movie : activeReviewObj.movie;
   reviewTextEl.innerHTML = formatReviewHtml(
-    activeReviewObj.review,
-    activeReviewObj.movie,
+    displayedReview,
+    displayedMovieForRedaction,
     Boolean(existingAnswer)
   );
 
@@ -1965,6 +2064,9 @@ function renderCurrentPhase() {
 
 async function showRevealCard(phaseData, isCorrect, usedHint = false) {
   const activeReviewObj = getActiveReviewForPhase(state.currentPhase) || phaseData.reviewObj;
+  const existingAnswer = state.answers[state.currentPhase];
+  const revealedMovie = existingAnswer && existingAnswer.movie ? existingAnswer.movie : activeReviewObj.movie;
+  const revealedAuthor = existingAnswer && existingAnswer.author ? existingAnswer.author : activeReviewObj.author;
   const revealCard = document.getElementById("reveal-card");
   const badge = document.getElementById("reveal-badge");
   const titleEl = document.getElementById("reveal-movie-title");
@@ -1984,8 +2086,8 @@ async function showRevealCard(phaseData, isCorrect, usedHint = false) {
     badge.textContent = "✕ Errou";
   }
 
-  titleEl.textContent = activeReviewObj.movie;
-  authorEl.textContent = activeReviewObj.author;
+  titleEl.textContent = revealedMovie;
+  authorEl.textContent = revealedAuthor;
 
   if (state.currentPhase + 1 < TOTAL_PHASES) {
     nextBtnText.textContent = "Próxima Fase";
@@ -1996,17 +2098,18 @@ async function showRevealCard(phaseData, isCorrect, usedHint = false) {
   skeleton.classList.remove("hidden");
   posterImg.classList.add("hidden");
   fallbackBox.classList.add("hidden");
-  fallbackTitle.textContent = activeReviewObj.movie;
+  fallbackTitle.textContent = revealedMovie;
 
   // Sempre exibe o filme correto revelado no Box de DVD 3D com giroscópio (mesmo se a pessoa errar)
   setDvd3dMode(true);
 
   revealCard.classList.remove("hidden");
 
-  const targetMovie = activeReviewObj.movie;
+  const targetMovie = revealedMovie;
   const posterUrl = await resolveMoviePoster(targetMovie);
 
-  const currentMovieNow = state.dailyPhases[state.currentPhase]?.reviewObj?.movie;
+  const currentAnsNow = state.answers[state.currentPhase];
+  const currentMovieNow = (currentAnsNow && currentAnsNow.movie) || state.dailyPhases[state.currentPhase]?.reviewObj?.movie;
   if (currentMovieNow !== targetMovie) return;
 
   if (posterUrl) {
@@ -2150,7 +2253,7 @@ function renderSummaryDvdShelf() {
     const phase = state.dailyPhases[selectedIdx];
     const ans = state.answers[selectedIdx];
     if (phase && shelfCaption) {
-      shelfCaption.textContent = phase.reviewObj.movie;
+      shelfCaption.textContent = (ans && ans.movie) ? ans.movie : phase.reviewObj.movie;
     }
     if (shelfCaptionBox) {
       shelfCaptionBox.classList.remove("correct", "correct-hint", "wrong");
@@ -2162,6 +2265,7 @@ function renderSummaryDvdShelf() {
   state.dailyPhases.forEach((phase, idx) => {
     const rev = phase.reviewObj;
     const ans = state.answers[idx];
+    const displayedMovie = (ans && ans.movie) ? ans.movie : rev.movie;
     const statusClass = ans && ans.correct ? (ans.usedHint ? "correct-hint" : "correct") : "wrong";
     const statusSymbol = ans && ans.correct ? "✓" : "✕";
     const imgId = `shelf-dvd-img-${idx}`;
@@ -2175,7 +2279,7 @@ function renderSummaryDvdShelf() {
         <div class="shelf-dvd-front">
           <div class="shelf-dvd-lip"><span>CINEMINHA</span></div>
           <div class="shelf-dvd-art">
-            <img id="${imgId}" class="shelf-dvd-img" src="assets/icon.jpg" alt="${escapeHtml(rev.movie)}" referrerpolicy="no-referrer" />
+            <img id="${imgId}" class="shelf-dvd-img" src="assets/icon.jpg" alt="${escapeHtml(displayedMovie)}" referrerpolicy="no-referrer" />
             <div class="shelf-dvd-glare"></div>
             <span class="shelf-status-dot ${statusClass}">${statusSymbol}</span>
           </div>
@@ -2190,7 +2294,7 @@ function renderSummaryDvdShelf() {
 
     shelfStage.appendChild(item);
 
-    resolveMoviePoster(rev.movie).then(url => {
+    resolveMoviePoster(displayedMovie).then(url => {
       if (url) {
         const imgEl = document.getElementById(imgId);
         if (imgEl) imgEl.src = url;
@@ -2241,6 +2345,7 @@ async function showSummaryView() {
     const ans = state.answers[i];
     const rev = phase.reviewObj;
     const statusEmoji = getAnswerEmoji(ans);
+    const displayedMovie = ans && ans.movie ? ans.movie : rev.movie;
     const displayedAuthor = ans && ans.author ? ans.author : rev.author;
     const displayedQuote = ans && ans.review ? ans.review : rev.review;
 
@@ -2249,10 +2354,10 @@ async function showSummaryView() {
 
     const imgId = `recap-poster-${i}`;
     item.innerHTML = `
-      <img id="${imgId}" class="recap-poster" src="assets/icon.jpg" alt="${escapeHtml(rev.movie)}" referrerpolicy="no-referrer" />
+      <img id="${imgId}" class="recap-poster" src="assets/icon.jpg" alt="${escapeHtml(displayedMovie)}" referrerpolicy="no-referrer" />
       <div class="recap-details">
         <div class="recap-movie-row">
-          <span class="recap-movie">${statusEmoji} ${escapeHtml(rev.movie)}</span>
+          <span class="recap-movie">${statusEmoji} ${escapeHtml(displayedMovie)}</span>
           <span class="recap-author">por ${escapeHtml(displayedAuthor)}</span>
         </div>
         <p class="recap-quote">“${escapeHtml(displayedQuote)}”</p>
@@ -2260,7 +2365,7 @@ async function showSummaryView() {
     `;
     recapList.appendChild(item);
 
-    resolveMoviePoster(rev.movie).then(url => {
+    resolveMoviePoster(displayedMovie).then(url => {
       if (url) {
         const imgEl = document.getElementById(imgId);
         if (imgEl) imgEl.src = url;
