@@ -775,6 +775,102 @@ function formatReviewHtml(reviewText, movieTitle, isRevealed = false) {
 // 7. SORTEIO DAS 5 FASES DIÁRIAS (100% IGUAL PARA TODO MUNDO NO DIA)
 // ============================================================================
 
+function addDaysIso(isoDate, deltaDays) {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + deltaDays));
+  return dt.toISOString().slice(0, 10);
+}
+
+function getReviewUniqueKey(rev) {
+  return `${String(rev?.movie || "").trim()}||${String(rev?.review || "").trim()}`;
+}
+
+const PINNED_DAILY_REVIEWS = {
+  "2026-11-15": [
+    { movie: "Um Ano Inesquecível: Outono", reviewPrefix: "esperando o wesley com meu ifood", correctIdx: 3 },
+    { movie: "O Invasor", reviewPrefix: "Eu vc e esse filme ngm presta", correctIdx: 2 },
+    { movie: "Amor.com", reviewPrefix: "Sasa e cellbit the movie", correctIdx: 0 },
+    { movie: "Matou a Família e Foi ao Cinema", reviewPrefix: "bb = ladrao de calcinha?", correctIdx: 1 },
+    { movie: "Muleque Té Doido 4", reviewPrefix: "Cinema.", correctIdx: 0 }
+  ],
+  "2026-11-16": [
+    { movie: "Enaldinho e o Mistério da Lagoa", reviewPrefix: "nah they fucking", correctIdx: 1 },
+    { movie: "Hoje Eu Quero Voltar Sozinho", reviewPrefix: "gi, se a gente fosse um eclipse", correctIdx: 2 },
+    { movie: "Um Ano Inesquecível: Inverno", reviewPrefix: "Every fish in the sea", correctIdx: 2 },
+    { movie: "Abrigo Nuclear", reviewPrefix: "O fallout brasileiro eh foda", correctIdx: 0 },
+    { movie: "Quinze Dias", reviewPrefix: "🤢🤮🤮", correctIdx: 3 }
+  ]
+};
+
+function resolvePinnedReviewsForDay(reviews, dayIso) {
+  const specs = PINNED_DAILY_REVIEWS[dayIso];
+  if (!specs) return null;
+  return specs.map((spec, idx) => {
+    const found =
+      reviews.find(
+        r => r.movie === spec.movie && String(r.review || "").trim().startsWith(spec.reviewPrefix)
+      ) ||
+      reviews.find(r => r.movie === spec.movie) ||
+      {
+        id: idx,
+        date: "01/01/2025",
+        movie: spec.movie,
+        author: "Cineminha",
+        review: spec.reviewPrefix
+      };
+    return { reviewObj: found, correctIdx: spec.correctIdx };
+  });
+}
+
+function pickDayReviewsAvoidingRecent(reviewsPool, dayIso, blockedKeys) {
+  const pinned = resolvePinnedReviewsForDay(reviewsPool, dayIso);
+  if (pinned) return pinned.map(p => p.reviewObj);
+
+  const daySeed = `cineminha-ovavat-${dayIso}`;
+  const ranked = reviewsPool
+    .slice()
+    .sort((a, b) => {
+      const ha = cyrb32(`${daySeed}|rev|${a.movie}|${a.author}|${a.review}`);
+      const hb = cyrb32(`${daySeed}|rev|${b.movie}|${b.author}|${b.review}`);
+      if (ha !== hb) return ha - hb;
+      return a.movie.localeCompare(b.movie);
+    });
+
+  const selected = [];
+  const usedMoviesToday = new Set();
+
+  // 1ª passada: filmes distintos + reviews que NÃO apareceram nos últimos 30 dias
+  for (const rev of ranked) {
+    if (!usedMoviesToday.has(rev.movie) && !blockedKeys.has(getReviewUniqueKey(rev))) {
+      usedMoviesToday.add(rev.movie);
+      selected.push(rev);
+      if (selected.length === TOTAL_PHASES) break;
+    }
+  }
+
+  // Fallback caso o acervo inteiro fique abaixo de 5 fases disponíveis
+  if (selected.length < TOTAL_PHASES) {
+    for (const rev of ranked) {
+      if (!usedMoviesToday.has(rev.movie)) {
+        usedMoviesToday.add(rev.movie);
+        selected.push(rev);
+        if (selected.length === TOTAL_PHASES) break;
+      }
+    }
+  }
+
+  if (selected.length < TOTAL_PHASES) {
+    for (const rev of ranked) {
+      if (!selected.includes(rev)) {
+        selected.push(rev);
+        if (selected.length === TOTAL_PHASES) break;
+      }
+    }
+  }
+
+  return selected;
+}
+
 function buildDailyChallenge(reviews, allMovies, dateIso) {
   const eligibleReviews = reviews.filter(r => {
     const rIso = parseBrDateToIso(r.date);
@@ -794,91 +890,73 @@ function buildDailyChallenge(reviews, allMovies, dateIso) {
     ? eligibleMovieTitles
     : normalizedMovies.map(m => m.title);
 
-  // Para 16/11/2026, congela exatamente as 5 perguntas originais (e seus índices corretos) para que edições na planilha não quebrem o dia de hoje
-  if (dateIso === "2026-11-16") {
-    const pinnedSpecs = [
-      { movie: "Enaldinho e o Mistério da Lagoa", reviewPrefix: "nah they fucking", correctIdx: 1 },
-      { movie: "Hoje Eu Quero Voltar Sozinho", reviewPrefix: "gi, se a gente fosse um eclipse", correctIdx: 2 },
-      { movie: "Um Ano Inesquecível: Inverno", reviewPrefix: "Every fish in the sea", correctIdx: 2 },
-      { movie: "Abrigo Nuclear", reviewPrefix: "O fallout brasileiro eh foda", correctIdx: 0 },
-      { movie: "Quinze Dias", reviewPrefix: "🤢🤮🤮", correctIdx: 3 }
-    ];
-
-    const pinnedPhases = pinnedSpecs.map((spec, phaseIdx) => {
-      const found =
-        reviews.find(
-          r => r.movie === spec.movie && String(r.review || "").trim().startsWith(spec.reviewPrefix)
-        ) ||
-        reviews.find(r => r.movie === spec.movie) ||
-        {
-          id: phaseIdx,
-          date: "01/01/2025",
-          movie: spec.movie,
-          author: "Cineminha",
-          review: spec.reviewPrefix
-        };
-
+  // Para dias fixados (15/11 e 16/11), preserva exatamente as perguntas e posições originais
+  const pinnedForDate = resolvePinnedReviewsForDay(reviews, dateIso);
+  if (pinnedForDate) {
+    return pinnedForDate.map(({ reviewObj, correctIdx }, phaseIdx) => {
       const wrongPool = moviePool
-        .filter(m => m !== found.movie)
+        .filter(m => m !== reviewObj.movie)
         .sort((a, b) => cyrb32(`${seedKey}|opt|${phaseIdx}|${a}`) - cyrb32(`${seedKey}|opt|${phaseIdx}|${b}`));
       const distractors = wrongPool.slice(0, 3);
       const options = [];
       let dPtr = 0;
       for (let slot = 0; slot < 4; slot++) {
-        if (slot === spec.correctIdx) {
-          options.push(found.movie);
-        } else {
-          options.push(distractors[dPtr++] || found.movie);
-        }
+        options.push(slot === correctIdx ? reviewObj.movie : (distractors[dPtr++] || reviewObj.movie));
       }
 
-      const extraRng = mulberry32(cyrb32(`${seedKey}-extra-reviews-${phaseIdx}-${found.movie}`));
+      const extraRng = mulberry32(cyrb32(`${seedKey}-extra-reviews-${phaseIdx}-${reviewObj.movie}`));
       const sameMovieOthers = pool.filter(
-        r => r.movie === found.movie && r.review.trim() !== found.review.trim()
+        r => r.movie === reviewObj.movie && r.review.trim() !== reviewObj.review.trim()
       );
       const extraReviews = seededShuffle(sameMovieOthers, extraRng).slice(0, 1);
 
       return {
-        reviewObj: found,
+        reviewObj,
         extraReviews,
         options,
-        correctIndex: spec.correctIdx
+        correctIndex: correctIdx
       };
     });
-
-    return pinnedPhases;
   }
 
-  // Para os próximos dias: cada review recebe um hash próprio independente da posição no array,
-  // evitando que adicionar filmes antigos na planilha embaralhe todo o sorteio do dia!
-  const rankedReviews = pool
-    .slice()
-    .sort((a, b) => {
-      const ha = cyrb32(`${seedKey}|rev|${a.movie}|${a.author}|${a.review}`);
-      const hb = cyrb32(`${seedKey}|rev|${b.movie}|${b.author}|${b.review}`);
-      if (ha !== hb) return ha - hb;
-      return a.movie.localeCompare(b.movie);
+  // Garante que nenhuma review se repita em no mínimo 30 dias (se o filme repetir, usa outra review)
+  const NO_REPEAT_DAYS = 30;
+  const historyStartIso = addDaysIso(dateIso, -NO_REPEAT_DAYS);
+  const firstTrackableIso = historyStartIso > LAUNCH_DATE_STR ? historyStartIso : LAUNCH_DATE_STR;
+  const recentQueue = []; // Lista cronológica [{ dayIso, keys }] dos últimos 30 dias
+  const blockedReviewKeys = new Set();
+
+  for (let dIso = firstTrackableIso; dIso < dateIso; dIso = addDaysIso(dIso, 1)) {
+    const windowCutoff = addDaysIso(dIso, -NO_REPEAT_DAYS);
+    while (recentQueue.length > 0 && recentQueue[0].dayIso <= windowCutoff) {
+      const expired = recentQueue.shift();
+      expired.keys.forEach(k => blockedReviewKeys.delete(k));
+    }
+
+    const dayPool = reviews.filter(r => {
+      const rIso = parseBrDateToIso(r.date);
+      return !rIso || rIso < dIso;
     });
-
-  const selectedReviews = [];
-  const usedMoviesToday = new Set();
-
-  for (const rev of rankedReviews) {
-    if (!usedMoviesToday.has(rev.movie)) {
-      usedMoviesToday.add(rev.movie);
-      selectedReviews.push(rev);
-      if (selectedReviews.length === TOTAL_PHASES) break;
-    }
+    const chosen = pickDayReviewsAvoidingRecent(
+      dayPool.length >= TOTAL_PHASES ? dayPool : reviews,
+      dIso,
+      blockedReviewKeys
+    );
+    const chosenKeys = chosen.map(getReviewUniqueKey);
+    chosenKeys.forEach(k => blockedReviewKeys.add(k));
+    recentQueue.push({ dayIso: dIso, keys: chosenKeys });
   }
 
-  if (selectedReviews.length < TOTAL_PHASES) {
-    for (const rev of rankedReviews) {
-      if (!selectedReviews.includes(rev)) {
-        selectedReviews.push(rev);
-        if (selectedReviews.length === TOTAL_PHASES) break;
-      }
-    }
+  // Limpa qualquer dia que tenha mais de 30 dias de diferença para `dateIso`
+  const todayCutoff = addDaysIso(dateIso, -NO_REPEAT_DAYS);
+  while (recentQueue.length > 0 && recentQueue[0].dayIso <= todayCutoff) {
+    const expired = recentQueue.shift();
+    expired.keys.forEach(k => blockedReviewKeys.delete(k));
   }
+  blockedReviewKeys.clear();
+  recentQueue.forEach(item => item.keys.forEach(k => blockedReviewKeys.add(k)));
+
+  const selectedReviews = pickDayReviewsAvoidingRecent(pool, dateIso, blockedReviewKeys);
 
   return selectedReviews.map((reviewObj, phaseIdx) => {
     const wrongPool = moviePool
@@ -890,12 +968,14 @@ function buildDailyChallenge(reviews, allMovies, dateIso) {
     );
     const correctIndex = options.indexOf(reviewObj.movie);
 
-    // Apenas 1 review extra do mesmo filme (sorteada de forma determinística para todos no dia)
+    // Review extra do mesmo filme (também evitando reviews usadas nos últimos 30 dias sempre que houver outra)
     const extraRng = mulberry32(cyrb32(`${seedKey}-extra-reviews-${phaseIdx}-${reviewObj.movie}`));
     const sameMovieOthers = pool.filter(
       r => r.movie === reviewObj.movie && r.review.trim() !== reviewObj.review.trim()
     );
-    const extraReviews = seededShuffle(sameMovieOthers, extraRng).slice(0, 1);
+    const freshSameMovieOthers = sameMovieOthers.filter(r => !blockedReviewKeys.has(getReviewUniqueKey(r)));
+    const extraPool = freshSameMovieOthers.length > 0 ? freshSameMovieOthers : sameMovieOthers;
+    const extraReviews = seededShuffle(extraPool, extraRng).slice(0, 1);
 
     return {
       reviewObj,
