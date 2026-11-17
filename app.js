@@ -2157,6 +2157,13 @@ async function showRevealCard(phaseData, isCorrect, usedHint = false) {
   const posterImg = document.getElementById("reveal-poster");
   const fallbackBox = document.getElementById("poster-fallback");
   const fallbackTitle = document.getElementById("poster-fallback-title");
+  const dvdBox3d = document.getElementById("dvd-box-3d");
+
+  if (dvdBox3d) {
+    dvdBox3d.classList.remove("is-shiny", "is-foil", "is-especial");
+    const rarity = getMovieRarityTier(revealedMovie);
+    if (rarity) dvdBox3d.classList.add(`is-${rarity}`);
+  }
 
   if (isCorrect) {
     badge.className = `status-pill ${usedHint ? "correct-hint" : "correct"}`;
@@ -2346,12 +2353,14 @@ function renderSummaryDvdShelf() {
     const rev = phase.reviewObj;
     const ans = state.answers[idx];
     const displayedMovie = (ans && ans.movie) ? ans.movie : rev.movie;
+    const rarity = getMovieRarityTier(displayedMovie);
+    const rarityMeta = rarity ? RARITY_META[rarity] : null;
     const statusClass = ans && ans.correct ? (ans.usedHint ? "correct-hint" : "correct") : "wrong";
     const statusSymbol = ans && ans.correct ? "✓" : "✕";
     const imgId = `shelf-dvd-img-${idx}`;
 
     const item = document.createElement("div");
-    item.className = "shelf-dvd-item";
+    item.className = `shelf-dvd-item${statusClass === "wrong" ? " is-wrong" : ""}${rarity ? ` rarity-${rarity}` : ""}`;
     item.innerHTML = `
       <div class="shelf-dvd-box">
         <div class="shelf-dvd-spine"><span>DVD</span></div>
@@ -2586,10 +2595,22 @@ function getMovieTitle(movieEntry) {
   return typeof movieEntry === "string" ? movieEntry : String(movieEntry.title || "");
 }
 
-function isMovieShiny(movieName) {
-  const movieObj = state.allMovies.find(m => getMovieTitle(m) === movieName);
-  return Boolean(movieObj && typeof movieObj.avgRating === "number" && movieObj.avgRating > 8);
+function getMovieRarityTier(movieName) {
+  const cleanName = String(movieName || "").trim();
+  if (cleanName === "Lucicreide Vai pra Marte") return "especial";
+  if (cleanName === "E Aí... Comeu?") return "foil";
+  const movieObj = state.allMovies.find(m => getMovieTitle(m) === cleanName);
+  if (movieObj && typeof movieObj.avgRating === "number" && movieObj.avgRating > 8.5) {
+    return "shiny";
+  }
+  return null;
 }
+
+const RARITY_META = {
+  shiny: { icon: "✨", label: "Raro", title: "Filme Raro • Nota > 8,5" },
+  foil: { icon: "🪩", label: "Foil", title: "Carta Foil • E Aí... Comeu?" },
+  especial: { icon: "🌀", label: "Especial", title: "Carta Especial • Lucicreide Vai pra Marte" }
+};
 
 function renderPokedexView() {
   syncPokedexFromProgress();
@@ -2614,33 +2635,29 @@ function renderPokedexView() {
 
   grid.innerHTML = "";
 
-  // Coloca os filmes já acertados (Descobertos em 3D) primeiro no topo da grade, mantendo o número #XXX original de cada um!
+  // Mantém todos os filmes em ordem numérica (#001, #002, ...)
   const entries = movieTitles.map((movieName, idx) => ({
     movieName,
     idx,
     isUnlocked: Boolean(state.pokedex[movieName]) || Boolean(state.pokedexPreviewAll)
   }));
 
-  entries.sort((a, b) => {
-    if (a.isUnlocked !== b.isUnlocked) return a.isUnlocked ? -1 : 1;
-    return a.idx - b.idx;
-  });
-
   entries.forEach(({ movieName, idx, isUnlocked }) => {
     if (state.pokedexFilter === "unlocked" && !isUnlocked) return;
     if (state.pokedexFilter === "locked" && isUnlocked) return;
 
     const numStr = `#${String(idx + 1).padStart(3, "0")}`;
-    const isShiny = isUnlocked && isMovieShiny(movieName);
+    const rarity = isUnlocked ? getMovieRarityTier(movieName) : null;
+    const rarityMeta = rarity ? RARITY_META[rarity] : null;
     const slot = document.createElement("div");
-    slot.className = `pokedex-slot ${isUnlocked ? "unlocked" : "locked"}${isShiny ? " shiny" : ""}`;
+    slot.className = `pokedex-slot ${isUnlocked ? "unlocked" : "locked"}${rarity ? ` ${rarity}` : ""}`;
 
     if (isUnlocked) {
       const imgId = `pokedex-img-${idx}`;
       slot.innerHTML = `
         <div class="pokedex-slot-top">
           <span class="pokedex-num-badge">${numStr}</span>
-          ${isShiny ? `<span class="pokedex-shiny-badge" title="Filme Raro • Nota > 8">✨</span>` : ""}
+          ${rarityMeta ? `<span class="pokedex-shiny-badge" title="${rarityMeta.title}">${rarityMeta.icon}</span>` : ""}
         </div>
         <div class="pokedex-mini-stage">
           <div class="pokedex-mini-dvd">
@@ -2729,12 +2746,16 @@ function openPokedexDvdModal(movieName, numStr) {
   const reviewsEl = document.getElementById("pokedex-modal-reviews");
   if (!modal) return;
 
-  const isShiny = isMovieShiny(movieName);
-  sheetEl?.classList.toggle("is-shiny", isShiny);
+  const rarity = getMovieRarityTier(movieName);
+  const rarityMeta = rarity ? RARITY_META[rarity] : null;
+  if (sheetEl) {
+    sheetEl.classList.remove("is-shiny", "is-foil", "is-especial");
+    if (rarity) sheetEl.classList.add(`is-${rarity}`);
+  }
 
   if (numEl) {
-    numEl.className = `eyebrow-badge${isShiny ? " shiny-eyebrow" : ""}`;
-    numEl.textContent = isShiny ? `✨ ${numStr} • Raro` : numStr;
+    numEl.className = `eyebrow-badge${rarity ? ` ${rarity}-eyebrow` : ""}`;
+    numEl.textContent = rarityMeta ? `${rarityMeta.icon} ${numStr} • ${rarityMeta.label}` : numStr;
   }
   if (titleEl) titleEl.textContent = movieName;
   if (hintEl) {
@@ -2767,7 +2788,7 @@ function openPokedexDvdModal(movieName, numStr) {
       const avgFormatted = avg.toFixed(2).replace(".", ",");
       const starsFormatted = String(stars).replace(".", ",");
       reviewsEl.innerHTML = `
-        <div class="pokedex-rating-box${isShiny ? " is-shiny" : ""}">
+        <div class="pokedex-rating-box${rarity ? ` is-${rarity}` : ""}">
           <div class="pokedex-stars-row" aria-label="${starsFormatted} de 5 estrelas">
             ${buildStarsSvgHtml(stars)}
           </div>
@@ -3292,9 +3313,10 @@ async function loadLeaderboardFromCloud() {
         currentRank = idx + 1;
       }
       const isMe = state.profileSession && state.profileSession.username === p.username;
+      const isFirst = currentRank === 1;
       const rankBadge = currentRank === 1 ? "🥇" : currentRank === 2 ? "🥈" : currentRank === 3 ? "🥉" : `${currentRank}º`;
       const row = document.createElement("div");
-      row.className = `leaderboard-item ${isMe ? "is-me" : ""}`;
+      row.className = `leaderboard-item${isMe ? " is-me" : ""}${isFirst ? " is-first" : ""}`;
       row.innerHTML = `
         <span class="leaderboard-rank">${rankBadge}</span>
         <div class="leaderboard-user">
