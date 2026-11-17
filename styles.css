@@ -2227,7 +2227,8 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 18px;
+  min-height: 22px;
+  overflow: visible;
 }
 
 .pokedex-num-badge {
@@ -2262,11 +2263,9 @@ html, body {
 @keyframes shinySparklePulse {
   0%, 100% {
     transform: scale(1) rotate(0deg);
-    filter: drop-shadow(0 0 4px rgba(255, 196, 0, 0.7));
   }
   50% {
-    transform: scale(1.16) rotate(10deg);
-    filter: drop-shadow(0 0 8px rgba(255, 215, 0, 0.95));
+    transform: scale(1.12) rotate(8deg);
   }
 }
 
@@ -2286,7 +2285,6 @@ html, body {
     0 8px 22px -4px rgba(245, 179, 1, 0.28),
     0 0 0 1px rgba(255, 215, 64, 0.25),
     inset 0 1px 1.5px rgba(255, 255, 255, 0.9);
-  overflow: hidden;
 }
 
 [data-theme="dark"] .pokedex-slot.unlocked.shiny {
@@ -2312,8 +2310,12 @@ html, body {
 }
 
 .pokedex-shiny-badge {
-  font-size: 0.76rem;
-  line-height: 1;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  width: 22px;
+  height: 22px;
+  padding: 2px;
+  overflow: visible;
   display: inline-flex;
   align-items: center;
   justify-content: center;
