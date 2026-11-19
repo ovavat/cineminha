@@ -1894,13 +1894,17 @@ function syncPokedexFromProgress() {
   } catch (_) {}
 
   // 3. Garante que qualquer filme registrado em stats.history[dt].movies (a partir de COLLECTION_START_DATE) esteja na Coleção
+  //    e remove eventuais DVDs "fantasmas" cuja data já tem histórico fechado sem aquele filme
   try {
     const stats = getStats();
     if (stats.history && typeof stats.history === "object") {
+      const validHistoryMovies = new Set();
       for (const [dt, entry] of Object.entries(stats.history)) {
         if (dt >= COLLECTION_START_DATE && entry && Array.isArray(entry.movies)) {
           entry.movies.forEach(mv => {
-            if (mv && !state.pokedex[mv]) {
+            if (!mv) return;
+            validHistoryMovies.add(mv);
+            if (!state.pokedex[mv]) {
               state.pokedex[mv] = {
                 unlockedAt: dt,
                 usedHint: false
@@ -1908,6 +1912,19 @@ function syncPokedexFromProgress() {
               changed = true;
             }
           });
+        }
+      }
+
+      for (const [mv, info] of Object.entries(state.pokedex)) {
+        const dt = info && info.unlockedAt ? String(info.unlockedAt) : "";
+        const histEntry = dt ? stats.history[dt] : null;
+        if (
+          histEntry &&
+          Array.isArray(histEntry.movies) &&
+          !validHistoryMovies.has(mv)
+        ) {
+          delete state.pokedex[mv];
+          changed = true;
         }
       }
     }
@@ -3297,6 +3314,7 @@ async function loadLeaderboardFromCloud() {
         username: r.username,
         displayName: r.display_name || r.username,
         streak,
+        dvds,
         totalCorrect
       };
     });
@@ -3321,7 +3339,10 @@ async function loadLeaderboardFromCloud() {
         <span class="leaderboard-rank">${rankBadge}</span>
         <div class="leaderboard-user">
           <span class="leaderboard-name">${escapeHtml(p.displayName)}</span>
-          <span class="leaderboard-streak-badge" title="Streak ativa">🔥 ${p.streak}</span>
+          <div class="leaderboard-meta-row">
+            <span class="leaderboard-streak-badge" title="Streak ativa">🔥 ${p.streak}</span>
+            <span class="leaderboard-streak-badge" title="DVDs colecionados">💿 ${p.dvds}</span>
+          </div>
         </div>
         <div class="leaderboard-badges">
           <span class="leaderboard-score-pill">🎯 ${p.totalCorrect}</span>
