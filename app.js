@@ -19,13 +19,14 @@ const GOOGLE_FORM_ID = "1FAIpQLSdETTJrAbgkLuMhNYVPXaVfIXWdNHgwIZosPoCVU2n6vuUIIQ
 const GOOGLE_FORM_VIEW_URL = `https://docs.google.com/forms/d/e/${GOOGLE_FORM_ID}/viewform`;
 const GOOGLE_FORM_RESPONSE_URL = `https://docs.google.com/forms/d/e/${GOOGLE_FORM_ID}/formResponse`;
 const RATE_WINDOW_DURATION_MS = 30 * 60 * 1000; // 30 minutos após a 1ª review do filme na planilha
+const RATE_TEST_PREVIEW_UNLOCK = false;
 
 const STORAGE_KEYS = {
   STATS: "ovavat_stats_v1",
   DAILY_PROGRESS: "ovavat_daily_v1",
   POKEDEX: "ovavat_pokedex_v2",
   PROFILE_SESSION: "ovavat_profile_session_v1",
-  SHEET_CACHE: "ovavat_sheet_cache_v4",
+  SHEET_CACHE: "ovavat_sheet_cache_v5",
   POSTER_CACHE: "ovavat_poster_cache_v9_wikidata_ptbr",
   THEME: "ovavat_theme_v2_light",
   PWA_DISMISSED_DATE: "ovavat_pwa_dismissed_v1",
@@ -42,6 +43,8 @@ const state = {
   editionNumber: 1,
   allReviews: [],
   allMovies: [],
+  voterRatings: {},    // Mapa { [voterName]: { [0..10]: [movieTitles] } }
+  lastNotaPostersKey: "",
   dailyPhases: [],     // Array de 5 objetos: { reviewObj, extraReviews, options: [4 strings], correctIndex }
   currentPhase: 0,     // 0..4
   answers: [],         // Array de { selectedIndex, correct, usedHint, movie, author, review }
@@ -506,11 +509,59 @@ function seededShuffle(array, rng) {
 // 5. LEITURA E PARSE DA PLANILHA GOOGLE SHEETS (2024, 2025, 2026+)
 // ============================================================================
 
+function normalizeSheetAuthorToVoter(rawAuthor) {
+  if (!rawAuthor) return null;
+  const s = String(rawAuthor)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  if (!s || s === "outre" || s === "letterboxd") return null;
+
+  if (s === "kobas" || s === "luis gustavo") return "Kobas";
+  if (s.includes("fruet")) return "Fruet";
+  if (s.includes("geizu") || s.includes("geizer")) return "Geizu";
+  if (s === "[gio]" || s === "gio") return "Gio";
+  if (s === "derp" || s === "dep" || s === "dero") return "Derp";
+  if (s === "tom" || s === "tom maia" || s.startsWith("tom ")) return "Tom";
+  if (
+    s.includes("jacom") ||
+    s.includes("vitor") ||
+    s === "vitro" ||
+    s === "virto" ||
+    s === "jacool" ||
+    s === "jacudiru" ||
+    s === "jaclobs" ||
+    s === "jacui" ||
+    s === "jarao" ||
+    s === "jacoutono" ||
+    s === "jafarofeiro" ||
+    s.includes("jacoins")
+  ) {
+    return "Jacom";
+  }
+  if (s.includes("gustav")) return "Gustavo";
+  if (
+    s.includes("raio") ||
+    s.includes("gabriel vaz") ||
+    s.includes("gabriel \"biriba\" vaz") ||
+    s.includes("gabrie va") ||
+    s === "farofa vaz" ||
+    s === "raoioioio" ||
+    s === "raelio" ||
+    s === "riao"
+  ) {
+    return "Raio";
+  }
+  return null;
+}
+
 function parseGvizTable(table) {
   const rows = (table && table.rows) || [];
   const validReviews = [];
   const movieFirstMeta = new Map();
   const movieScores = new Map();
+  const voterRatings = {};
 
   for (let i = 0; i < rows.length; i++) {
     const c = rows[i].c;
@@ -540,6 +591,20 @@ function parseGvizTable(table) {
         prev.sum += numericGrade;
         prev.count += 1;
         movieScores.set(movie, prev);
+
+        const voterName = normalizeSheetAuthorToVoter(author);
+        if (voterName) {
+          const gradeInt = Math.min(10, Math.max(0, Math.round(numericGrade)));
+          if (!voterRatings[voterName]) {
+            voterRatings[voterName] = {};
+          }
+          if (!voterRatings[voterName][gradeInt]) {
+            voterRatings[voterName][gradeInt] = [];
+          }
+          if (!voterRatings[voterName][gradeInt].includes(movie)) {
+            voterRatings[voterName][gradeInt].push(movie);
+          }
+        }
       }
     }
 
@@ -589,7 +654,8 @@ function parseGvizTable(table) {
 
   return {
     reviews: validReviews,
-    movies
+    movies,
+    voterRatings
   };
 }
 
@@ -1994,23 +2060,6 @@ function syncPokedexFromProgress() {
   }
 }
 
-function resetDailyGameForTesting() {
-  localStorage.removeItem(STORAGE_KEYS.DAILY_PROGRESS);
-  state.currentPhase = 0;
-  state.answers = [];
-  state.phaseHints = {};
-  state.completed = false;
-  state.dailyStartedAt = 0;
-  setDvd3dMode(false);
-
-  document.getElementById("summary-view").classList.add("hidden");
-  document.getElementById("game-view").classList.remove("hidden");
-  document.getElementById("modal-reset").classList.add("hidden");
-
-  renderCurrentPhase();
-  showToast("Partida reiniciada! 🔄");
-}
-
 // ============================================================================
 // 10. INTERFACE E RENDERIZAÇÃO
 // ============================================================================
@@ -2773,9 +2822,88 @@ function selectRateVoter(voterName, options = {}) {
   }
 
   updateRateVoterUI(chosen);
+  const currentNotaVal = document.getElementById("rate-slider-nota")?.value ?? 0;
+  renderRateNotaPosters(currentNotaVal, true);
 
   if (closeModal) {
     document.getElementById("modal-rate-voter")?.classList.add("hidden");
+  }
+}
+
+function renderRateNotaPosters(gradeVal, forceReshuffle = false) {
+  const container = document.getElementById("rate-nota-posters-row");
+  if (!container) return;
+
+  const voter = state.rateSelectedVoter || "Outre";
+  if (!voter || voter === "Outre") {
+    state.lastNotaPostersKey = "";
+    container.classList.add("hidden");
+    container.innerHTML = "";
+    return;
+  }
+
+  const numVal = Math.min(10, Math.max(0, Math.round(Number(gradeVal) || 0)));
+  const pool =
+    (state.voterRatings &&
+      state.voterRatings[voter] &&
+      state.voterRatings[voter][numVal]) ||
+    [];
+  const renderKey = `${voter}:${numVal}:${pool.length}`;
+
+  if (
+    !forceReshuffle &&
+    state.lastNotaPostersKey === renderKey &&
+    container.children.length === 6
+  ) {
+    return;
+  }
+
+  state.lastNotaPostersKey = renderKey;
+  container.classList.remove("hidden");
+  container.innerHTML = "";
+
+  // Sorteia até 6 filmes aleatórios aos quais o usuário deu essa mesma nota
+  const shuffled = pool.slice();
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  const picked = shuffled.slice(0, 6);
+
+  for (let slotIdx = 0; slotIdx < 6; slotIdx++) {
+    const movieName = picked[slotIdx];
+    const slot = document.createElement("div");
+
+    if (movieName) {
+      slot.className = "rate-nota-poster-slot";
+      slot.title = movieName;
+
+      const img = document.createElement("img");
+      img.className = "rate-nota-poster-img";
+      img.alt = movieName;
+      img.referrerPolicy = "no-referrer";
+
+      const cachedUrl = state.posterMemoryCache[movieName];
+      if (cachedUrl) {
+        img.src = cachedUrl;
+        img.classList.add("is-loaded");
+      } else {
+        resolveMoviePoster(movieName).then(url => {
+          if (url) {
+            img.onload = () => img.classList.add("is-loaded");
+            img.src = url;
+          }
+        });
+      }
+
+      slot.appendChild(img);
+    } else {
+      // Espaço restante totalmente em branco (sem imagem provisória)
+      slot.className = "rate-nota-poster-slot is-blank";
+      slot.setAttribute("aria-hidden", "true");
+    }
+
+    container.appendChild(slot);
   }
 }
 
@@ -2794,6 +2922,7 @@ function updateRateSliderUI(sliderId, val) {
     if (starsEl) {
       starsEl.innerHTML = buildStarsSvgHtml(numVal / 2);
     }
+    renderRateNotaPosters(numVal, false);
   } else if (sliderId === "rate-slider-riso") {
     const pill = document.getElementById("rate-val-riso");
     if (pill) pill.textContent = String(numVal);
@@ -2829,12 +2958,14 @@ function getVotedFormMovie() {
 }
 
 function isCurrentRateMovieVoted() {
+  if (RATE_TEST_PREVIEW_UNLOCK) return false;
   const currentMovie = (state.rateMovieTitle || "Nome Próprio").trim();
   const votedMovie = getVotedFormMovie();
   return Boolean(currentMovie && votedMovie && currentMovie === votedMovie);
 }
 
 function isCurrentRateMovieExpired() {
+  if (RATE_TEST_PREVIEW_UNLOCK) return false;
   const currentMovie = (state.rateMovieTitle || "Nome Próprio").trim();
   if (!currentMovie || !Array.isArray(state.allMovies)) return false;
   const movieObj = state.allMovies.find(m => getMovieTitle(m) === currentMovie);
@@ -2850,6 +2981,9 @@ async function refreshSheetForRateView() {
     if (fresh && Array.isArray(fresh.movies) && fresh.movies.length > 0) {
       state.allReviews = fresh.reviews;
       state.allMovies = fresh.movies;
+      if (fresh.voterRatings) {
+        state.voterRatings = fresh.voterRatings;
+      }
       try {
         localStorage.setItem(STORAGE_KEYS.SHEET_CACHE, JSON.stringify(fresh));
       } catch (_) {}
@@ -3951,38 +4085,6 @@ function bindEvents() {
     document.getElementById("modal-pwa-install")?.classList.add("hidden");
   });
 
-  // Botão secreto de Reset ao clicar 5 vezes seguidas no ícone do topo (com 2 etapas de confirmação)
-  let logoClickCount = 0;
-  let logoClickTimer = null;
-  document.getElementById("brand-icon-trigger").addEventListener("click", () => {
-    logoClickCount += 1;
-    clearTimeout(logoClickTimer);
-
-    if (logoClickCount >= 5) {
-      logoClickCount = 0;
-      document.getElementById("reset-step-1").classList.remove("hidden");
-      document.getElementById("reset-step-2").classList.add("hidden");
-      document.getElementById("modal-reset").classList.remove("hidden");
-    } else {
-      logoClickTimer = setTimeout(() => {
-        logoClickCount = 0;
-      }, 1800);
-    }
-  });
-
-  document.getElementById("btn-reset-step1").addEventListener("click", () => {
-    document.getElementById("reset-step-1").classList.add("hidden");
-    document.getElementById("reset-step-2").classList.remove("hidden");
-  });
-
-  document.getElementById("btn-confirm-reset-same").addEventListener("click", () => {
-    resetDailyGameForTesting();
-  });
-
-  document.getElementById("btn-cancel-reset").addEventListener("click", () => {
-    document.getElementById("modal-reset").classList.add("hidden");
-  });
-
   document.getElementById("btn-copy-result").addEventListener("click", async () => {
     const text = buildShareText();
     try {
@@ -4263,6 +4365,7 @@ async function initApp() {
   const dataset = await loadReviewsDataset();
   state.allReviews = dataset.reviews;
   state.allMovies = dataset.movies;
+  state.voterRatings = dataset.voterRatings || {};
 
   updateHeaderStats();
 

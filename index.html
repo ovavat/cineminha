@@ -22,7 +22,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="styles.css?v=60" />
+  <link rel="stylesheet" href="styles.css?v=63" />
 </head>
 <body>
   <!-- Barra de Navegação Estilo iOS (Frosted Glass) -->
@@ -339,6 +339,8 @@
               <span>O Homem que Copiava (Excelente)</span>
             </div>
           </div>
+          <!-- 6 cartazes de filmes que o usuário já avaliou com a mesma nota do slider -->
+          <div class="rate-nota-posters-row hidden" id="rate-nota-posters-row" aria-label="Filmes que você avaliou com esta nota"></div>
         </div>
 
         <div class="ios-divider"></div>
@@ -678,37 +680,6 @@
     </div>
   </div>
 
-  <!-- Modal Secreto: Resetar Jogo (Ao clicar no ícone do topo, com 2 etapas) -->
-  <div class="modal-backdrop hidden" id="modal-reset">
-    <div class="ios-sheet" role="dialog" aria-modal="true" aria-labelledby="reset-title">
-      <div class="sheet-header">
-        <h2 id="reset-title">Modo de Teste</h2>
-        <button class="nav-circle-btn modal-close" data-close="modal-reset" aria-label="Fechar"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
-      </div>
-
-      <!-- Etapa 1 -->
-      <div class="sheet-body" id="reset-step-1">
-        <p>Deseja reiniciar o seu progresso nas 5 fases de hoje para testar novamente?</p>
-        <button class="ios-btn-primary" id="btn-reset-step1" type="button">
-          Resetar Jogo
-        </button>
-      </div>
-
-      <!-- Etapa 2: Confirmação -->
-      <div class="sheet-body hidden" id="reset-step-2">
-        <p><strong>Confirmar reinício?</strong> Suas respostas de hoje serão apagadas e você voltará para a Fase 1.</p>
-        <div class="sheet-actions">
-          <button class="ios-btn-danger" id="btn-confirm-reset-same" type="button">
-            Sim, resetar partida
-          </button>
-          <button class="ios-btn-secondary" id="btn-cancel-reset" type="button">
-            Cancelar
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <!-- Modal: Como Jogar -->
   <div class="modal-backdrop hidden" id="modal-help">
     <div class="ios-sheet" role="dialog" aria-modal="true" aria-labelledby="help-title">
@@ -816,8 +787,8 @@
   <!-- Toast de Notificação -->
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="posters-data.js?v=60"></script>
-  <script src="reviews-fallback.js?v=60"></script>
-  <script src="app.js?v=60"></script>
+  <script src="posters-data.js?v=63"></script>
+  <script src="reviews-fallback.js?v=63"></script>
+  <script src="app.js?v=63"></script>
 </body>
 </html>
