@@ -1,6 +1,7 @@
 // Dicas opcionais de desambiguação para busca online de cartazes (nenhuma imagem fica salva localmente)
 window.OVAVAT_POSTERS = {
-  "Nome Próprio": "https://m.media-amazon.com/images/M/MV5BMjdlNjNmMjEtZmNhNC00ZjA1LWIwYTYtN2RmNWIwODg5NTEwXkEyXkFqcGc@._V1_SX500.jpg"
+  "Nome Próprio": "https://m.media-amazon.com/images/M/MV5BMjdlNjNmMjEtZmNhNC00ZjA1LWIwYTYtN2RmNWIwODg5NTEwXkEyXkFqcGc@._V1_SX500.jpg",
+  "Transe": "https://m.media-amazon.com/images/M/MV5BODJlNjdiOTQtY2NkNC00NGE2LWE3MGMtOTE5OWM5MWIzYjNlXkEyXkFqcGc@._V1_SX500.jpg"
 };
 
 window.OVAVAT_MOVIE_SEARCH_HINTS = {

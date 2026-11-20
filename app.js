@@ -1018,7 +1018,7 @@ function loadPosterCache() {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.POSTER_CACHE);
     const saved = raw ? JSON.parse(raw) : {};
-    return { ...(window.OVAVAT_POSTERS || {}), ...saved };
+    return { ...saved, ...(window.OVAVAT_POSTERS || {}) };
   } catch (_) {
     return { ...(window.OVAVAT_POSTERS || {}) };
   }
