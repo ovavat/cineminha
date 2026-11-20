@@ -1,10 +1,12 @@
 // Dicas opcionais de desambiguação para busca online de cartazes (nenhuma imagem fica salva localmente)
 window.OVAVAT_POSTERS = {
   "Nome Próprio": "https://m.media-amazon.com/images/M/MV5BMjdlNjNmMjEtZmNhNC00ZjA1LWIwYTYtN2RmNWIwODg5NTEwXkEyXkFqcGc@._V1_SX500.jpg",
-  "Transe": "https://m.media-amazon.com/images/M/MV5BODJlNjdiOTQtY2NkNC00NGE2LWE3MGMtOTE5OWM5MWIzYjNlXkEyXkFqcGc@._V1_SX500.jpg"
+  "Transe": "https://m.media-amazon.com/images/M/MV5BODJlNjdiOTQtY2NkNC00NGE2LWE3MGMtOTE5OWM5MWIzYjNlXkEyXkFqcGc@._V1_SX500.jpg",
+  "Abrigo Nuclear": "https://m.media-amazon.com/images/M/MV5BMGMxMjdhMTItZGU2MS00YzY2LTgxZmUtMmRmZTY1YTBhYmUwXkEyXkFqcGc@._V1_SX500.jpg"
 };
 
 window.OVAVAT_MOVIE_SEARCH_HINTS = {
+  "Abrigo Nuclear": "Abrigo Nuclear (filme)",
   "Os 3": "Os 3 (filme)",
   "B.O.": "Boletim de Ocorrência (filme)",
   "Nina": "Nina (filme de 2004)",

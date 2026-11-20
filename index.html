@@ -22,7 +22,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="styles.css?v=53" />
+  <link rel="stylesheet" href="styles.css?v=59" />
 </head>
 <body>
   <!-- Barra de Navegação Estilo iOS (Frosted Glass) -->
@@ -286,7 +286,7 @@
     <main id="rate-view" class="view-container hidden" aria-label="IMDb do Ovavat">
       <div class="ios-card rate-hero-card">
         <div class="pokedex-hero-header">
-          <span class="eyebrow-badge pokedex-eyebrow">Avaliação</span>
+          <span class="eyebrow-badge pokedex-eyebrow" id="rate-eyebrow">Avaliação</span>
           <div class="pokedex-title-row">
             <h2 class="pokedex-title">IMDb do Ovavat</h2>
             <button type="button" class="pokedex-counter-pill rate-voter-pill-btn" id="btn-rate-voter-picker" aria-label="Escolher seu nome">
@@ -581,13 +581,17 @@
 
       <button class="liquid-nav-item" type="button" id="nav-tab-rate" data-tab="rate" aria-label="Avaliar Filme">
         <span class="liquid-nav-icon">
-          <!-- Ícone SF Symbol: star (Outline) -->
+          <!-- Ícone SF Symbol: popcorn (Outline) -->
           <svg class="sf-icon-outline" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.95" stroke-linecap="round" stroke-linejoin="round">
-            <polygon points="12 2.5 14.95 8.5 21.55 9.45 16.77 14.1 17.9 20.68 12 17.58 6.1 20.68 7.23 14.1 2.45 9.45 9.05 8.5 12 2.5"></polygon>
+            <path d="M18 8a2 2 0 0 0 0-4 2 2 0 0 0-4 0 2 2 0 0 0-4 0 2 2 0 0 0-4 0 2 2 0 0 0 0 4"></path>
+            <path d="M10 21 9 8"></path>
+            <path d="m14 21 1-13"></path>
+            <path d="M19 8c.6 0 1 .4.9 1l-1.5 10.2c-.1 1-1 1.8-2 1.8H7.6c-1 0-1.9-.8-2-1.8L4.1 9c-.1-.6.3-1 .9-1Z"></path>
           </svg>
-          <!-- Ícone SF Symbol: star.fill (Filled) -->
+          <!-- Ícone SF Symbol: popcorn.fill (Filled — mesmas dimensões externas 1:1 do outline) -->
           <svg class="sf-icon-filled" width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 2.1a.95.95 0 0 1 .85.53l2.63 5.34 5.89.86a.95.95 0 0 1 .53 1.62l-4.26 4.15 1.01 5.87a.95.95 0 0 1-1.38 1l-5.27-2.77-5.27 2.77a.95.95 0 0 1-1.38-1l1.01-5.87-4.26-4.15a.95.95 0 0 1 .53-1.62l5.89-.86 2.63-5.34A.95.95 0 0 1 12 2.1z"></path>
+            <path d="M10 1.05A2.95 2.95 0 0 0 7.22 3.02 2.95 2.95 0 0 0 3.05 6c0 .52.14 1.01.38 1.43h17.14c.24-.42.38-.91.38-1.43a2.95 2.95 0 0 0-4.17-2.98A2.95 2.95 0 0 0 14 1.05c-.77 0-1.47.3-2 .78a2.94 2.94 0 0 0-2-.78Z"></path>
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M4.4 8.65c-.75 0-1.32.66-1.21 1.4l1.52 10.12A2.75 2.75 0 0 0 7.43 22h9.14a2.75 2.75 0 0 0 2.72-2.33l1.52-10.12c.11-.74-.46-1.4-1.21-1.4H4.4Zm5.3 2.15a.8.8 0 0 0-1.6.12l.68 8.3a.8.8 0 0 0 1.6-.12l-.68-8.3Zm6.2.12a.8.8 0 1 0-1.6-.12l-.68 8.3a.8.8 0 1 0 1.6.12l.68-8.3Z"></path>
           </svg>
         </span>
       </button>
@@ -812,8 +816,8 @@
   <!-- Toast de Notificação -->
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="posters-data.js?v=53"></script>
-  <script src="reviews-fallback.js?v=53"></script>
-  <script src="app.js?v=53"></script>
+  <script src="posters-data.js?v=59"></script>
+  <script src="reviews-fallback.js?v=59"></script>
+  <script src="app.js?v=59"></script>
 </body>
 </html>

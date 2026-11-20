@@ -3250,9 +3250,17 @@ html, body {
 }
 
 .leaderboard-score-pill {
+  width: 84px;
+  min-width: 84px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  white-space: nowrap;
   font-size: 0.82rem;
   font-weight: 800;
-  padding: 5px 11px;
+  padding: 5px 6px;
   border-radius: 999px;
   background: var(--bg-card);
   border: 0.5px solid var(--border-card);
@@ -3268,19 +3276,19 @@ html, body {
   padding: 18px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 4px;
 }
 
 .rate-dvd-showcase {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 6px 0 4px;
+  gap: 6px;
+  padding: 0 0 2px;
 }
 
 .rate-dvd-stage {
-  margin: 2px 0 4px;
+  margin: -1px 0 2px;
 }
 
 .rate-movie-title {
@@ -3600,9 +3608,37 @@ html, body {
 }
 
 .rate-voter-pill-btn.is-locked {
-  opacity: 0.72;
   cursor: default;
   pointer-events: none;
+}
+
+.rate-voter-pill-btn.is-expired,
+#rate-eyebrow.is-expired {
+  opacity: 0.55;
+  filter: grayscale(1);
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+#rate-dvd-box.is-expired .reveal-poster,
+#rate-dvd-box.is-expired .dvd-plastic-lip,
+#rate-dvd-box.is-expired .dvd-glare {
+  filter: grayscale(100%) contrast(0.95) brightness(0.86);
+}
+
+#rate-dvd-box.is-expired .dvd-front {
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  box-shadow:
+    0 0 1px rgba(0, 0, 0, 0.08),
+    inset 3px 0 5px rgba(255, 255, 255, 0.16),
+    inset -1px 0 2px rgba(0, 0, 0, 0.6) !important;
+}
+
+.rate-form-card.is-expired {
+  filter: grayscale(1);
+  opacity: 0.52;
+  pointer-events: none;
+  user-select: none;
 }
 
 .rate-voted-card {

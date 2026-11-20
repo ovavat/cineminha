@@ -18,13 +18,14 @@ const SUPABASE_KEY = "sb_publishable_QkT0GDOivwCnfeBfVQ6nJw_e-CoJ_ic";
 const GOOGLE_FORM_ID = "1FAIpQLSdETTJrAbgkLuMhNYVPXaVfIXWdNHgwIZosPoCVU2n6vuUIIQ";
 const GOOGLE_FORM_VIEW_URL = `https://docs.google.com/forms/d/e/${GOOGLE_FORM_ID}/viewform`;
 const GOOGLE_FORM_RESPONSE_URL = `https://docs.google.com/forms/d/e/${GOOGLE_FORM_ID}/formResponse`;
+const RATE_WINDOW_DURATION_MS = 30 * 60 * 1000; // 30 minutos após a 1ª review do filme na planilha
 
 const STORAGE_KEYS = {
   STATS: "ovavat_stats_v1",
   DAILY_PROGRESS: "ovavat_daily_v1",
   POKEDEX: "ovavat_pokedex_v2",
   PROFILE_SESSION: "ovavat_profile_session_v1",
-  SHEET_CACHE: "ovavat_sheet_cache_v3",
+  SHEET_CACHE: "ovavat_sheet_cache_v4",
   POSTER_CACHE: "ovavat_poster_cache_v9_wikidata_ptbr",
   THEME: "ovavat_theme_v2_light",
   PWA_DISMISSED_DATE: "ovavat_pwa_dismissed_v1",
@@ -455,11 +456,12 @@ function parseBrDateTimeMs(dateFormatted) {
   const match = String(dateFormatted).match(/(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
   if (!match) return Infinity;
   const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"] = match;
+  // Converte o horário da planilha (Brasília, UTC-3) para epoch real em ms (comparável com Date.now())
   return Date.UTC(
     Number(yyyy),
     Number(mm) - 1,
     Number(dd),
-    Number(hh),
+    Number(hh) + 3,
     Number(min),
     Number(ss)
   );
@@ -2646,10 +2648,11 @@ function switchMainTab(tabName) {
 
     setDvd3dMode(true);
     renderRateMovieView();
-    if (!getSavedRateVoter() && !isCurrentRateMovieVoted()) {
+    if (!getSavedRateVoter() && !isCurrentRateMovieVoted() && !isCurrentRateMovieExpired()) {
       openRateVoterModal();
     }
     syncFormMovieFromGoogleForms();
+    refreshSheetForRateView();
     window.scrollTo({ top: 0, behavior: "smooth" });
   } else if (tabName === "profile") {
     if (glider) glider.style.setProperty("--glider-idx", "3");
@@ -2831,6 +2834,32 @@ function isCurrentRateMovieVoted() {
   return Boolean(currentMovie && votedMovie && currentMovie === votedMovie);
 }
 
+function isCurrentRateMovieExpired() {
+  const currentMovie = (state.rateMovieTitle || "Nome Próprio").trim();
+  if (!currentMovie || !Array.isArray(state.allMovies)) return false;
+  const movieObj = state.allMovies.find(m => getMovieTitle(m) === currentMovie);
+  if (!movieObj || typeof movieObj.firstTs !== "number" || !Number.isFinite(movieObj.firstTs)) {
+    return false;
+  }
+  return Date.now() - movieObj.firstTs >= RATE_WINDOW_DURATION_MS;
+}
+
+async function refreshSheetForRateView() {
+  try {
+    const fresh = await fetchSheetViaFetch().catch(() => fetchSheetViaJsonp());
+    if (fresh && Array.isArray(fresh.movies) && fresh.movies.length > 0) {
+      state.allReviews = fresh.reviews;
+      state.allMovies = fresh.movies;
+      try {
+        localStorage.setItem(STORAGE_KEYS.SHEET_CACHE, JSON.stringify(fresh));
+      } catch (_) {}
+      if (state.activeTab === "rate") {
+        renderRateMovieView();
+      }
+    }
+  } catch (_) {}
+}
+
 function markRateMovieVoted(movieTitle) {
   const cleanTitle = String(movieTitle || "").trim();
   if (!cleanTitle) return;
@@ -2895,15 +2924,49 @@ function renderRateMovieView() {
   }
 
   const alreadyVoted = isCurrentRateMovieVoted();
+  const windowExpired = !alreadyVoted && isCurrentRateMovieExpired();
+  const eyebrowEl = document.getElementById("rate-eyebrow");
+  const submitBtn = document.getElementById("btn-rate-submit");
+  const submitText = document.getElementById("btn-rate-submit-text");
+  const criticaEl = document.getElementById("rate-input-critica");
+
+  if (eyebrowEl) {
+    eyebrowEl.classList.toggle("is-expired", windowExpired);
+  }
+  if (boxEl) {
+    boxEl.classList.toggle("is-expired", windowExpired);
+  }
   if (formEl) {
     formEl.classList.toggle("hidden", alreadyVoted);
+    formEl.classList.toggle("is-expired", windowExpired);
+    formEl.querySelectorAll("input, textarea, button").forEach(el => {
+      el.disabled = windowExpired;
+    });
   }
   if (votedCardEl) {
     votedCardEl.classList.toggle("hidden", !alreadyVoted);
   }
   if (voterPickerBtn) {
-    voterPickerBtn.disabled = alreadyVoted;
+    const lockPicker = alreadyVoted || windowExpired;
+    voterPickerBtn.disabled = lockPicker;
     voterPickerBtn.classList.toggle("is-locked", alreadyVoted);
+    voterPickerBtn.classList.toggle("is-expired", windowExpired);
+  }
+  if (submitBtn) {
+    submitBtn.disabled = windowExpired;
+  }
+  if (submitText) {
+    submitText.textContent = windowExpired
+      ? "Votação encerrada"
+      : "Enviar pro IMDb do Ovavat";
+  }
+  if (criticaEl) {
+    criticaEl.placeholder = windowExpired
+      ? "Tempo de votação deste filme encerrado."
+      : "Escreva sua review...";
+  }
+  if (windowExpired) {
+    document.getElementById("modal-rate-voter")?.classList.add("hidden");
   }
 
   updateRateSliderUI("rate-slider-nota", document.getElementById("rate-slider-nota")?.value ?? 0);
@@ -2975,6 +3038,10 @@ async function syncFormMovieFromGoogleForms() {
 
 async function handleRateFormSubmit(e) {
   e.preventDefault();
+  if (isCurrentRateMovieVoted() || isCurrentRateMovieExpired()) {
+    renderRateMovieView();
+    return;
+  }
   if (!state.rateSelectedVoter) {
     openRateVoterModal();
     showToast("Escolha o seu nome para enviar! 👤");
