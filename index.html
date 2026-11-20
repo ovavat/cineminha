@@ -22,7 +22,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="styles.css?v=63" />
+  <link rel="stylesheet" href="styles.css?v=72" />
 </head>
 <body>
   <!-- Barra de Navegação Estilo iOS (Frosted Glass) -->
@@ -326,7 +326,7 @@
         <!-- 1. Nota (0 a 10 deslizável) -->
         <div class="rate-field-group">
           <div class="rate-field-header">
-            <label class="rate-field-label" for="rate-slider-nota">Nota ⭐</label>
+            <label class="rate-field-label" for="rate-slider-nota">Nota</label>
             <div class="rate-score-readout">
               <div class="rate-live-stars" id="rate-live-stars" aria-hidden="true"></div>
               <span class="rate-value-pill" id="rate-val-nota">0</span>
@@ -339,8 +339,11 @@
               <span>O Homem que Copiava (Excelente)</span>
             </div>
           </div>
-          <!-- 6 cartazes de filmes que o usuário já avaliou com a mesma nota do slider -->
-          <div class="rate-nota-posters-row hidden" id="rate-nota-posters-row" aria-label="Filmes que você avaliou com esta nota"></div>
+          <!-- Cartazes deslizáveis de filmes que o usuário já avaliou com a mesma nota (do mais recente ao mais antigo) -->
+          <div class="rate-nota-posters-wrap hidden" id="rate-nota-posters-wrap">
+            <div class="rate-nota-posters-row" id="rate-nota-posters-row" aria-label="Filmes que você avaliou com esta nota"></div>
+            <p class="rate-nota-posters-caption" id="rate-nota-posters-caption">Filmes mostrados com base nas suas reviews anteriores</p>
+          </div>
         </div>
 
         <div class="ios-divider"></div>
@@ -348,8 +351,11 @@
         <!-- 2. Risômetro (0 a 10 deslizável) -->
         <div class="rate-field-group">
           <div class="rate-field-header">
-            <label class="rate-field-label" for="rate-slider-riso">Risômetro 😂</label>
-            <span class="rate-value-pill" id="rate-val-riso">0</span>
+            <label class="rate-field-label" for="rate-slider-riso">Risômetro</label>
+            <div class="rate-score-readout">
+              <span class="rate-live-emoji" id="rate-live-riso-emoji" aria-hidden="true">💀</span>
+              <span class="rate-value-pill" id="rate-val-riso">0</span>
+            </div>
           </div>
           <div class="rate-slider-wrap">
             <input type="range" class="rate-ios-slider" id="rate-slider-riso" min="0" max="10" step="1" value="0" style="--slider-pct: 0%;" />
@@ -365,8 +371,11 @@
         <!-- 3. Lacrômetro (0 a 10 deslizável arco-íris) -->
         <div class="rate-field-group">
           <div class="rate-field-header">
-            <label class="rate-field-label" for="rate-slider-lacre">Lacrômetro 🏳️‍🌈</label>
-            <span class="rate-value-pill" id="rate-val-lacre">0</span>
+            <label class="rate-field-label" for="rate-slider-lacre">Lacrômetro</label>
+            <div class="rate-score-readout">
+              <span class="rate-live-emoji" id="rate-live-lacre-emoji" aria-hidden="true" style="opacity: 0;">🏳️‍🌈</span>
+              <span class="rate-value-pill" id="rate-val-lacre">0</span>
+            </div>
           </div>
           <div class="rate-slider-wrap">
             <input type="range" class="rate-ios-slider rainbow-slider" id="rate-slider-lacre" min="0" max="10" step="1" value="0" style="--slider-pct: 0%;" />
@@ -382,7 +391,7 @@
         <!-- 4. Crítica -->
         <div class="rate-field-group">
           <div class="rate-field-header">
-            <label class="rate-field-label" for="rate-input-critica">Crítica 🧐</label>
+            <label class="rate-field-label" for="rate-input-critica">Crítica</label>
           </div>
           <textarea
             id="rate-input-critica"
@@ -787,8 +796,8 @@
   <!-- Toast de Notificação -->
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="posters-data.js?v=63"></script>
-  <script src="reviews-fallback.js?v=63"></script>
-  <script src="app.js?v=63"></script>
+  <script src="posters-data.js?v=72"></script>
+  <script src="reviews-fallback.js?v=72"></script>
+  <script src="app.js?v=72"></script>
 </body>
 </html>

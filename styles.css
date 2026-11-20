@@ -3453,10 +3453,20 @@ html, body {
   height: 16px;
 }
 
+.rate-live-emoji {
+  font-size: 1.12rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .rate-value-pill {
-  min-width: 34px;
+  width: 40px;
+  min-width: 40px;
   height: 28px;
-  padding: 0 9px;
+  padding: 0;
+  box-sizing: border-box;
   border-radius: 999px;
   background: var(--accent-tint);
   border: 1px solid var(--accent-border);
@@ -3467,6 +3477,7 @@ html, body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 .rate-slider-wrap {
@@ -3525,14 +3536,14 @@ html, body {
   background-color: var(--bg-tertiary);
   background-image: linear-gradient(
     90deg,
-    #FF3B30 0%,
-    #FF9500 20%,
-    #FFCC00 40%,
-    #34C759 60%,
-    #007AFF 80%,
-    #AF52DE 100%
+    rgba(255, 59, 48, var(--lacre-alpha, 0)) 0%,
+    rgba(255, 149, 0, var(--lacre-alpha, 0)) 20%,
+    rgba(255, 204, 0, var(--lacre-alpha, 0)) 40%,
+    rgba(52, 199, 89, var(--lacre-alpha, 0)) 60%,
+    rgba(0, 122, 255, var(--lacre-alpha, 0)) 80%,
+    rgba(175, 82, 222, var(--lacre-alpha, 0)) 100%
   );
-  background-size: var(--slider-pct, 50%) 100%;
+  background-size: var(--slider-pct, 0%) 100%;
   background-repeat: no-repeat;
 }
 
@@ -3581,14 +3592,46 @@ html, body {
   color: var(--text-tertiary);
 }
 
-.rate-nota-posters-row {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 6px;
+.rate-nota-posters-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
   margin-top: 2px;
+  overflow-anchor: none;
+}
+
+#rate-view,
+.rate-form-card {
+  overflow-anchor: none;
+}
+
+.rate-nota-posters-row {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  padding: 1px 0 2px;
+}
+
+.rate-nota-posters-row::-webkit-scrollbar {
+  display: none;
+}
+
+.rate-nota-posters-row.is-dragging {
+  cursor: grabbing;
 }
 
 .rate-nota-poster-slot {
+  flex: 0 0 calc((100% - 30px) / 6);
+  width: calc((100% - 30px) / 6);
   aspect-ratio: 2 / 3;
   border-radius: 6px;
   overflow: hidden;
@@ -3610,10 +3653,33 @@ html, body {
   opacity: 0;
   transition: opacity 0.2s ease;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.16);
+  pointer-events: none;
 }
 
 .rate-nota-poster-img.is-loaded {
   opacity: 1;
+}
+
+.rate-nota-posters-caption {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  font-size: 0.68rem;
+  font-weight: 400;
+  color: var(--text-tertiary);
+  text-align: center;
+  white-space: nowrap;
+  margin: 2px 0 0;
+  letter-spacing: -0.005em;
+}
+
+.rate-nota-posters-caption::before,
+.rate-nota-posters-caption::after {
+  content: "";
+  flex: 1;
+  height: 0.5px;
+  background: var(--separator);
 }
 
 .rate-textarea {

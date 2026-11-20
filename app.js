@@ -26,7 +26,7 @@ const STORAGE_KEYS = {
   DAILY_PROGRESS: "ovavat_daily_v1",
   POKEDEX: "ovavat_pokedex_v2",
   PROFILE_SESSION: "ovavat_profile_session_v1",
-  SHEET_CACHE: "ovavat_sheet_cache_v5",
+  SHEET_CACHE: "ovavat_sheet_cache_v7",
   POSTER_CACHE: "ovavat_poster_cache_v9_wikidata_ptbr",
   THEME: "ovavat_theme_v2_light",
   PWA_DISMISSED_DATE: "ovavat_pwa_dismissed_v1",
@@ -525,18 +525,16 @@ function normalizeSheetAuthorToVoter(rawAuthor) {
   if (s === "derp" || s === "dep" || s === "dero") return "Derp";
   if (s === "tom" || s === "tom maia" || s.startsWith("tom ")) return "Tom";
   if (
-    s.includes("jacom") ||
-    s.includes("vitor") ||
-    s === "vitro" ||
-    s === "virto" ||
-    s === "jacool" ||
-    s === "jacudiru" ||
-    s === "jaclobs" ||
-    s === "jacui" ||
-    s === "jarao" ||
-    s === "jacoutono" ||
-    s === "jafarofeiro" ||
-    s.includes("jacoins")
+    !s.includes("vitor") &&
+    (s.includes("jacom") ||
+      s === "jacool" ||
+      s === "jacudiru" ||
+      s === "jaclobs" ||
+      s === "jacui" ||
+      s === "jarao" ||
+      s === "jacoutono" ||
+      s === "jafarofeiro" ||
+      s.includes("jacoins"))
   ) {
     return "Jacom";
   }
@@ -561,7 +559,7 @@ function parseGvizTable(table) {
   const validReviews = [];
   const movieFirstMeta = new Map();
   const movieScores = new Map();
-  const voterRatings = {};
+  const voterRatingMeta = {};
 
   for (let i = 0; i < rows.length; i++) {
     const c = rows[i].c;
@@ -595,14 +593,20 @@ function parseGvizTable(table) {
         const voterName = normalizeSheetAuthorToVoter(author);
         if (voterName) {
           const gradeInt = Math.min(10, Math.max(0, Math.round(numericGrade)));
-          if (!voterRatings[voterName]) {
-            voterRatings[voterName] = {};
+          if (!voterRatingMeta[voterName]) {
+            voterRatingMeta[voterName] = {};
           }
-          if (!voterRatings[voterName][gradeInt]) {
-            voterRatings[voterName][gradeInt] = [];
+          if (!voterRatingMeta[voterName][gradeInt]) {
+            voterRatingMeta[voterName][gradeInt] = new Map();
           }
-          if (!voterRatings[voterName][gradeInt].includes(movie)) {
-            voterRatings[voterName][gradeInt].push(movie);
+          const validTs = Number.isFinite(rowTs) ? rowTs : 0;
+          const prevEntry = voterRatingMeta[voterName][gradeInt].get(movie);
+          if (!prevEntry || validTs >= prevEntry.ts) {
+            voterRatingMeta[voterName][gradeInt].set(movie, {
+              movie,
+              ts: validTs,
+              rowIdx: i
+            });
           }
         }
       }
@@ -651,6 +655,20 @@ function parseGvizTable(table) {
         ratingCount
       };
     });
+
+  // Ordena os filmes de cada usuário por nota do MAIS RECENTE para o MAIS ANTIGO
+  const voterRatings = {};
+  for (const [vName, gradesObj] of Object.entries(voterRatingMeta)) {
+    voterRatings[vName] = {};
+    for (const [gKey, movieMap] of Object.entries(gradesObj)) {
+      voterRatings[vName][gKey] = Array.from(movieMap.values())
+        .sort((a, b) => {
+          if (b.ts !== a.ts) return b.ts - a.ts;
+          return b.rowIdx - a.rowIdx;
+        })
+        .map(entry => entry.movie);
+    }
+  }
 
   return {
     reviews: validReviews,
@@ -2830,19 +2848,21 @@ function selectRateVoter(voterName, options = {}) {
   }
 }
 
-function renderRateNotaPosters(gradeVal, forceReshuffle = false) {
+function renderRateNotaPosters(gradeVal, forceRebuild = false) {
+  const wrap = document.getElementById("rate-nota-posters-wrap");
   const container = document.getElementById("rate-nota-posters-row");
-  if (!container) return;
+  if (!container || !wrap) return;
 
   const voter = state.rateSelectedVoter || "Outre";
   if (!voter || voter === "Outre") {
     state.lastNotaPostersKey = "";
-    container.classList.add("hidden");
+    wrap.classList.add("hidden");
     container.innerHTML = "";
     return;
   }
 
   const numVal = Math.min(10, Math.max(0, Math.round(Number(gradeVal) || 0)));
+  // Lista já ordenada do mais recente para o mais antigo
   const pool =
     (state.voterRatings &&
       state.voterRatings[voter] &&
@@ -2851,27 +2871,27 @@ function renderRateNotaPosters(gradeVal, forceReshuffle = false) {
   const renderKey = `${voter}:${numVal}:${pool.length}`;
 
   if (
-    !forceReshuffle &&
+    !forceRebuild &&
     state.lastNotaPostersKey === renderKey &&
-    container.children.length === 6
+    container.children.length >= 6
   ) {
     return;
   }
 
   state.lastNotaPostersKey = renderKey;
-  container.classList.remove("hidden");
-  container.innerHTML = "";
-
-  // Sorteia até 6 filmes aleatórios aos quais o usuário deu essa mesma nota
-  const shuffled = pool.slice();
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  const savedWindowScrollY = window.scrollY;
+  const prevRowHeight = container.offsetHeight;
+  if (prevRowHeight > 0) {
+    container.style.minHeight = `${prevRowHeight}px`;
   }
-  const picked = shuffled.slice(0, 6);
 
-  for (let slotIdx = 0; slotIdx < 6; slotIdx++) {
-    const movieName = picked[slotIdx];
+  wrap.classList.remove("hidden");
+
+  const totalSlots = Math.max(6, pool.length);
+  const fragment = document.createDocumentFragment();
+
+  for (let slotIdx = 0; slotIdx < totalSlots; slotIdx++) {
+    const movieName = pool[slotIdx];
     const slot = document.createElement("div");
 
     if (movieName) {
@@ -2882,6 +2902,7 @@ function renderRateNotaPosters(gradeVal, forceReshuffle = false) {
       img.className = "rate-nota-poster-img";
       img.alt = movieName;
       img.referrerPolicy = "no-referrer";
+      img.draggable = false;
 
       const cachedUrl = state.posterMemoryCache[movieName];
       if (cachedUrl) {
@@ -2903,9 +2924,17 @@ function renderRateNotaPosters(gradeVal, forceReshuffle = false) {
       slot.setAttribute("aria-hidden", "true");
     }
 
-    container.appendChild(slot);
+    fragment.appendChild(slot);
+  }
+
+  container.replaceChildren(fragment);
+  container.scrollLeft = 0;
+  if (window.scrollY !== savedWindowScrollY) {
+    window.scrollTo(0, savedWindowScrollY);
   }
 }
+
+const RISO_EMOJIS = ["💀", "😶", "😐", "🙂", "😊", "😄", "😁", "😆", "😂", "🤣", "😭"];
 
 function updateRateSliderUI(sliderId, val) {
   const slider = document.getElementById(sliderId);
@@ -2926,9 +2955,21 @@ function updateRateSliderUI(sliderId, val) {
   } else if (sliderId === "rate-slider-riso") {
     const pill = document.getElementById("rate-val-riso");
     if (pill) pill.textContent = String(numVal);
+    const risoEmojiEl = document.getElementById("rate-live-riso-emoji");
+    if (risoEmojiEl) {
+      risoEmojiEl.textContent = RISO_EMOJIS[numVal] || "💀";
+    }
   } else if (sliderId === "rate-slider-lacre") {
     const pill = document.getElementById("rate-val-lacre");
     if (pill) pill.textContent = String(numVal);
+    const alpha = numVal / 10;
+    if (slider) {
+      slider.style.setProperty("--lacre-alpha", String(alpha));
+    }
+    const lacreEmojiEl = document.getElementById("rate-live-lacre-emoji");
+    if (lacreEmojiEl) {
+      lacreEmojiEl.style.opacity = String(alpha);
+    }
   }
 
   const ticksRow = document.querySelector(`.rate-ticks-row[data-target="${sliderId}"]`);
@@ -4271,6 +4312,43 @@ function bindEvents() {
       updateRateSliderUI(sliderId, sliderEl.value);
     });
   });
+
+  // Permite arrastar horizontalmente com o mouse a fileira de cartazes da Nota no PC
+  const notaPostersRow = document.getElementById("rate-nota-posters-row");
+  if (notaPostersRow) {
+    let isDown = false;
+    let startX = 0;
+    let scrollStart = 0;
+
+    notaPostersRow.addEventListener("pointerdown", e => {
+      if (e.pointerType !== "mouse" || e.button !== 0) return;
+      isDown = true;
+      startX = e.clientX;
+      scrollStart = notaPostersRow.scrollLeft;
+      notaPostersRow.classList.add("is-dragging");
+      try {
+        notaPostersRow.setPointerCapture(e.pointerId);
+      } catch (_) {}
+    });
+
+    notaPostersRow.addEventListener("pointermove", e => {
+      if (!isDown) return;
+      const dx = e.clientX - startX;
+      notaPostersRow.scrollLeft = scrollStart - dx;
+    });
+
+    const stopDrag = e => {
+      if (!isDown) return;
+      isDown = false;
+      notaPostersRow.classList.remove("is-dragging");
+      try {
+        notaPostersRow.releasePointerCapture(e.pointerId);
+      } catch (_) {}
+    };
+
+    notaPostersRow.addEventListener("pointerup", stopDrag);
+    notaPostersRow.addEventListener("pointercancel", stopDrag);
+  }
 
   document.getElementById("imdb-rate-form")?.addEventListener("submit", handleRateFormSubmit);
 
