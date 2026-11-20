@@ -22,7 +22,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="styles.css?v=46" />
+  <link rel="stylesheet" href="styles.css?v=50" />
 </head>
 <body>
   <!-- Barra de Navegação Estilo iOS (Frosted Glass) -->
@@ -282,6 +282,137 @@
       </section>
     </main>
 
+    <!-- Tela de Avaliação (IMDb do Ovavat — Sincronizada com o Google Forms) -->
+    <main id="rate-view" class="view-container hidden" aria-label="IMDb do Ovavat">
+      <div class="ios-card rate-hero-card">
+        <div class="pokedex-hero-header">
+          <span class="eyebrow-badge pokedex-eyebrow">Avaliação</span>
+          <div class="pokedex-title-row">
+            <h2 class="pokedex-title">IMDb do Ovavat</h2>
+            <button type="button" class="pokedex-counter-pill rate-voter-pill-btn" id="btn-rate-voter-picker" aria-label="Escolher seu nome">
+              <span id="rate-voter-pill-label">Outre</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="rate-dvd-showcase">
+          <div class="pokedex-inspect-stage rate-dvd-stage" id="rate-dvd-stage">
+            <div class="dvd-box-3d" id="rate-dvd-box">
+              <div class="dvd-spine">
+                <span class="dvd-spine-logo">DVD</span>
+                <span class="dvd-spine-line"></span>
+              </div>
+              <div class="dvd-edge-right"></div>
+              <div class="dvd-edge-top"></div>
+              <div class="dvd-edge-bottom"></div>
+              <div class="dvd-front">
+                <div class="dvd-plastic-lip">
+                  <span>CINEMINHA</span>
+                </div>
+                <div class="dvd-artwork-wrap">
+                  <img id="rate-dvd-img" class="reveal-poster" src="assets/icon.jpg" alt="Cartaz do filme da semana" referrerpolicy="no-referrer" />
+                  <div class="dvd-glare"></div>
+                  <div class="dvd-sleeve-border"></div>
+                </div>
+              </div>
+            </div>
+            <div class="dvd-shadow" id="rate-dvd-shadow"></div>
+          </div>
+          <h3 class="rate-movie-title" id="rate-movie-title">Nome Próprio</h3>
+        </div>
+      </div>
+
+      <form class="ios-card rate-form-card" id="imdb-rate-form" autocomplete="off">
+        <!-- 1. Nota (0 a 10 deslizável) -->
+        <div class="rate-field-group">
+          <div class="rate-field-header">
+            <label class="rate-field-label" for="rate-slider-nota">Nota ⭐</label>
+            <div class="rate-score-readout">
+              <div class="rate-live-stars" id="rate-live-stars" aria-hidden="true"></div>
+              <span class="rate-value-pill" id="rate-val-nota">0</span>
+            </div>
+          </div>
+          <div class="rate-slider-wrap">
+            <input type="range" class="rate-ios-slider" id="rate-slider-nota" min="0" max="10" step="1" value="0" style="--slider-pct: 0%;" />
+            <div class="rate-extremes-row">
+              <span>É Fada (Péssimo)</span>
+              <span>O Homem que Copiava (Excelente)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="ios-divider"></div>
+
+        <!-- 2. Risômetro (0 a 10 deslizável) -->
+        <div class="rate-field-group">
+          <div class="rate-field-header">
+            <label class="rate-field-label" for="rate-slider-riso">Risômetro 😂</label>
+            <span class="rate-value-pill" id="rate-val-riso">0</span>
+          </div>
+          <div class="rate-slider-wrap">
+            <input type="range" class="rate-ios-slider" id="rate-slider-riso" min="0" max="10" step="1" value="0" style="--slider-pct: 0%;" />
+            <div class="rate-extremes-row">
+              <span>Nem ri</span>
+              <span>Eu Ri (muito)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="ios-divider"></div>
+
+        <!-- 3. Lacrômetro (0 a 10 deslizável arco-íris) -->
+        <div class="rate-field-group">
+          <div class="rate-field-header">
+            <label class="rate-field-label" for="rate-slider-lacre">Lacrômetro 🏳️‍🌈</label>
+            <span class="rate-value-pill" id="rate-val-lacre">0</span>
+          </div>
+          <div class="rate-slider-wrap">
+            <input type="range" class="rate-ios-slider rainbow-slider" id="rate-slider-lacre" min="0" max="10" step="1" value="0" style="--slider-pct: 0%;" />
+            <div class="rate-extremes-row">
+              <span>Doutrinador</span>
+              <span>Praia do Futuro</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="ios-divider"></div>
+
+        <!-- 4. Crítica -->
+        <div class="rate-field-group">
+          <div class="rate-field-header">
+            <label class="rate-field-label" for="rate-input-critica">Crítica 🧐</label>
+          </div>
+          <textarea
+            id="rate-input-critica"
+            class="rate-textarea"
+            rows="3"
+            placeholder="Escreva sua review..."
+          ></textarea>
+        </div>
+
+        <button class="ios-btn-primary profile-submit-btn" id="btn-rate-submit" type="submit">
+          <span id="btn-rate-submit-text">Enviar pro IMDb do Ovavat</span>
+        </button>
+      </form>
+
+      <!-- Card exibido após o usuário já ter votado no filme atual da semana -->
+      <div class="ios-card rate-voted-card hidden" id="rate-voted-card" aria-live="polite">
+        <div class="rate-voted-emblem" aria-hidden="true">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 6 9 17l-5-5"></path>
+          </svg>
+        </div>
+        <h3 class="rate-voted-title">Voto registrado na sessão!</h3>
+        <p class="rate-voted-text">
+          Valeu pela review! Sua avaliação de <strong id="rate-voted-movie-name">Nome Próprio</strong> já foi enviada pro IMDb do Ovavat.
+        </p>
+        <div class="rate-voted-pill">
+          <span>🎬</span>
+          <span>Liberado novamente quando o próximo filme entrar em cartaz</span>
+        </div>
+      </div>
+    </main>
+
     <!-- Tela de Perfil & Sincronização em Nuvem (Celular + PC) -->
     <main id="profile-view" class="view-container hidden" aria-label="Perfil do Jogador">
       <!-- Card de Login / Criar Conta (exibido quando desconectado) -->
@@ -438,6 +569,19 @@
         </span>
       </button>
 
+      <button class="liquid-nav-item" type="button" id="nav-tab-rate" data-tab="rate" aria-label="Avaliar Filme">
+        <span class="liquid-nav-icon">
+          <!-- Ícone SF Symbol: star (Outline) -->
+          <svg class="sf-icon-outline" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.95" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="12 2.5 14.95 8.5 21.55 9.45 16.77 14.1 17.9 20.68 12 17.58 6.1 20.68 7.23 14.1 2.45 9.45 9.05 8.5 12 2.5"></polygon>
+          </svg>
+          <!-- Ícone SF Symbol: star.fill (Filled) -->
+          <svg class="sf-icon-filled" width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2.1a.95.95 0 0 1 .85.53l2.63 5.34 5.89.86a.95.95 0 0 1 .53 1.62l-4.26 4.15 1.01 5.87a.95.95 0 0 1-1.38 1l-5.27-2.77-5.27 2.77a.95.95 0 0 1-1.38-1l1.01-5.87-4.26-4.15a.95.95 0 0 1 .53-1.62l5.89-.86 2.63-5.34A.95.95 0 0 1 12 2.1z"></path>
+          </svg>
+        </span>
+      </button>
+
       <button class="liquid-nav-item" type="button" id="nav-tab-profile" data-tab="profile" aria-label="Ranking">
         <span class="liquid-nav-icon">
           <!-- Ícone SF Symbol: trophy (Outline) -->
@@ -457,6 +601,31 @@
       </button>
     </div>
   </nav>
+
+  <!-- Modal: Escolher Seu Nome na Avaliação (IMDb do Ovavat) -->
+  <div class="modal-backdrop hidden" id="modal-rate-voter">
+    <div class="ios-sheet rate-voter-sheet" role="dialog" aria-modal="true" aria-labelledby="rate-voter-modal-title">
+      <div class="sheet-header">
+        <h2 class="sheet-title" id="rate-voter-modal-title">Seu Nome 👤</h2>
+        <button class="nav-circle-btn modal-close" data-close="modal-rate-voter" aria-label="Fechar"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+      </div>
+      <div class="sheet-body">
+        <p class="rate-voter-modal-sub">Escolha quem está avaliando. Sua escolha ficará salva para as próximas sessões.</p>
+        <div class="rate-names-grid rate-modal-names-grid" id="rate-names-grid" role="radiogroup" aria-label="Seu Nome">
+          <button type="button" class="rate-name-chip" data-name="Derp">Derp</button>
+          <button type="button" class="rate-name-chip" data-name="Fruet">Fruet</button>
+          <button type="button" class="rate-name-chip" data-name="Gio">Gio</button>
+          <button type="button" class="rate-name-chip" data-name="Geizu">Geizu</button>
+          <button type="button" class="rate-name-chip" data-name="Gustavo">Gustavo</button>
+          <button type="button" class="rate-name-chip" data-name="Jacom">Jacom</button>
+          <button type="button" class="rate-name-chip" data-name="Kobas">Kobas</button>
+          <button type="button" class="rate-name-chip" data-name="Raio">Raio</button>
+          <button type="button" class="rate-name-chip" data-name="Tom">Tom</button>
+          <button type="button" class="rate-name-chip" data-name="Outre">Outre</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Modal: Inspetor 3D do DVD na Pokédex -->
   <div class="modal-backdrop hidden" id="modal-pokedex-dvd">
@@ -633,8 +802,8 @@
   <!-- Toast de Notificação -->
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="posters-data.js?v=46"></script>
-  <script src="reviews-fallback.js?v=46"></script>
-  <script src="app.js?v=46"></script>
+  <script src="posters-data.js?v=50"></script>
+  <script src="reviews-fallback.js?v=50"></script>
+  <script src="app.js?v=50"></script>
 </body>
 </html>

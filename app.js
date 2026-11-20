@@ -14,6 +14,10 @@ const COLLECTION_START_DATE = "2026-11-15"; // Só considera partidas/filmes/ace
 const SUPABASE_URL = "https://riyvxpgyouxyljhfqknj.supabase.co";
 const SUPABASE_KEY = "sb_publishable_QkT0GDOivwCnfeBfVQ6nJw_e-CoJ_ic";
 
+const GOOGLE_FORM_ID = "1FAIpQLSdETTJrAbgkLuMhNYVPXaVfIXWdNHgwIZosPoCVU2n6vuUIIQ";
+const GOOGLE_FORM_VIEW_URL = `https://docs.google.com/forms/d/e/${GOOGLE_FORM_ID}/viewform`;
+const GOOGLE_FORM_RESPONSE_URL = `https://docs.google.com/forms/d/e/${GOOGLE_FORM_ID}/formResponse`;
+
 const STORAGE_KEYS = {
   STATS: "ovavat_stats_v1",
   DAILY_PROGRESS: "ovavat_daily_v1",
@@ -22,7 +26,10 @@ const STORAGE_KEYS = {
   SHEET_CACHE: "ovavat_sheet_cache_v3",
   POSTER_CACHE: "ovavat_poster_cache_v9_wikidata_ptbr",
   THEME: "ovavat_theme_v2_light",
-  PWA_DISMISSED_DATE: "ovavat_pwa_dismissed_v1"
+  PWA_DISMISSED_DATE: "ovavat_pwa_dismissed_v1",
+  FORM_MOVIE: "ovavat_form_movie_v1",
+  FORM_VOTER: "ovavat_form_voter_v2_popup",
+  FORM_VOTED_MOVIE: "ovavat_form_voted_movie_v1"
 };
 
 // Estado em memória
@@ -46,6 +53,9 @@ const state = {
   pokedex: {},         // Mapa { [movieName]: { unlockedAt, usedHint } }
   profileSession: null, // { username, displayName, pinHash }
   authMode: "login",   // "login" | "register"
+  rateMovieTitle: "Nome Próprio",
+  rateSelectedVoter: "Outre",
+  rateFetchingMovie: false,
   posterMemoryCache: {},
   posterInflight: {},
   deferredInstallPrompt: null,
@@ -167,6 +177,7 @@ function initDvd3dInteractions() {
   const stage = document.getElementById("dvd-stage");
   const shelfStage = document.getElementById("summary-shelf-stage");
   const pokedexInspectStage = document.getElementById("pokedex-inspect-stage");
+  const rateDvdStage = document.getElementById("rate-dvd-stage");
 
   let isDragging = false;
   let dragStartX = 0;
@@ -204,7 +215,7 @@ function initDvd3dInteractions() {
     state.gyro.pointerInteracting = false;
   }
 
-  [stage, shelfStage, pokedexInspectStage].forEach(el => {
+  [stage, shelfStage, pokedexInspectStage, rateDvdStage].forEach(el => {
     if (!el) return;
 
     // Impede o navegador de tentar "arrastar o arquivo da imagem" ao clicar e puxar com o mouse
@@ -259,6 +270,8 @@ function startDvd3dAnimationLoop() {
   const shelfStageEl = document.getElementById("summary-shelf-stage");
   const pokedexBoxEl = document.getElementById("pokedex-inspect-box");
   const pokedexShadowEl = document.getElementById("pokedex-inspect-shadow");
+  const rateBoxEl = document.getElementById("rate-dvd-box");
+  const rateShadowEl = document.getElementById("rate-dvd-shadow");
   const startTime = performance.now();
 
   function tick(now) {
@@ -292,6 +305,13 @@ function startDvd3dAnimationLoop() {
       pokedexBoxEl.style.setProperty("--ry", `${ry.toFixed(2)}deg`);
       pokedexBoxEl.style.setProperty("--glare-x", `${glareX.toFixed(1)}%`);
       pokedexBoxEl.style.setProperty("--glare-y", `${glareY.toFixed(1)}%`);
+    }
+
+    if (rateBoxEl) {
+      rateBoxEl.style.setProperty("--rx", `${rx.toFixed(2)}deg`);
+      rateBoxEl.style.setProperty("--ry", `${ry.toFixed(2)}deg`);
+      rateBoxEl.style.setProperty("--glare-x", `${glareX.toFixed(1)}%`);
+      rateBoxEl.style.setProperty("--glare-y", `${glareY.toFixed(1)}%`);
     }
 
     if (shelfStageEl) {
@@ -333,6 +353,10 @@ function startDvd3dAnimationLoop() {
     if (pokedexShadowEl) {
       const shadowX = clamp(-ry * 0.45, -12, 12);
       pokedexShadowEl.style.setProperty("--shadow-x", `${shadowX.toFixed(1)}px`);
+    }
+    if (rateShadowEl) {
+      const shadowX = clamp(-ry * 0.45, -12, 12);
+      rateShadowEl.style.setProperty("--shadow-x", `${shadowX.toFixed(1)}px`);
     }
 
     state.gyro.rafId = requestAnimationFrame(tick);
@@ -1659,6 +1683,14 @@ function sanitizeStatsObject(rawStats) {
   const currentStreak = isStreakAlive ? histStreak : 0;
   const maxStreak = histMaxStreak;
   const played = validDates.length;
+  const formVoterPicked =
+    st.formVoterPicked && typeof st.formVoterPicked === "string" && FORM_VOTER_NAMES.includes(st.formVoterPicked)
+      ? st.formVoterPicked
+      : null;
+  const formVotedMovie =
+    st.formVotedMovie && typeof st.formVotedMovie === "string" && st.formVotedMovie.trim().length >= 2
+      ? st.formVotedMovie.trim()
+      : null;
 
   return {
     played,
@@ -1667,7 +1699,9 @@ function sanitizeStatsObject(rawStats) {
     maxStreak,
     lastCompletedDate,
     distribution: dist,
-    history: cleanHist
+    history: cleanHist,
+    formVoterPicked,
+    formVotedMovie
   };
 }
 
@@ -1685,7 +1719,9 @@ function getStats() {
     maxStreak: 0,
     lastCompletedDate: null,
     distribution: [0, 0, 0, 0, 0, 0],
-    history: {}
+    history: {},
+    formVoterPicked: null,
+    formVotedMovie: null
   };
 }
 
@@ -2537,11 +2573,13 @@ function switchMainTab(tabName) {
   const glider = document.getElementById("liquid-glass-glider");
   const btnGame = document.getElementById("nav-tab-game");
   const btnPokedex = document.getElementById("nav-tab-pokedex");
+  const btnRate = document.getElementById("nav-tab-rate");
   const btnProfile = document.getElementById("nav-tab-profile");
   const progressSection = document.getElementById("progress-header-section");
   const gameView = document.getElementById("game-view");
   const summaryView = document.getElementById("summary-view");
   const pokedexView = document.getElementById("pokedex-view");
+  const rateView = document.getElementById("rate-view");
   const profileView = document.getElementById("profile-view");
 
   if (glider) {
@@ -2558,6 +2596,7 @@ function switchMainTab(tabName) {
 
   btnGame?.classList.remove("active");
   btnPokedex?.classList.remove("active");
+  btnRate?.classList.remove("active");
   btnProfile?.classList.remove("active");
 
   if (tabName === "pokedex") {
@@ -2567,19 +2606,39 @@ function switchMainTab(tabName) {
     progressSection?.classList.add("hidden");
     gameView?.classList.add("hidden");
     summaryView?.classList.add("hidden");
+    rateView?.classList.add("hidden");
     profileView?.classList.add("hidden");
     pokedexView?.classList.remove("hidden");
 
     renderPokedexView();
     window.scrollTo({ top: 0, behavior: "smooth" });
-  } else if (tabName === "profile") {
+  } else if (tabName === "rate") {
     if (glider) glider.style.setProperty("--glider-idx", "2");
+    btnRate?.classList.add("active");
+
+    progressSection?.classList.add("hidden");
+    gameView?.classList.add("hidden");
+    summaryView?.classList.add("hidden");
+    pokedexView?.classList.add("hidden");
+    profileView?.classList.add("hidden");
+    rateView?.classList.remove("hidden");
+
+    setDvd3dMode(true);
+    renderRateMovieView();
+    if (!getSavedRateVoter() && !isCurrentRateMovieVoted()) {
+      openRateVoterModal();
+    }
+    syncFormMovieFromGoogleForms();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } else if (tabName === "profile") {
+    if (glider) glider.style.setProperty("--glider-idx", "3");
     btnProfile?.classList.add("active");
 
     progressSection?.classList.add("hidden");
     gameView?.classList.add("hidden");
     summaryView?.classList.add("hidden");
     pokedexView?.classList.add("hidden");
+    rateView?.classList.add("hidden");
     profileView?.classList.remove("hidden");
 
     renderProfileView();
@@ -2590,6 +2649,7 @@ function switchMainTab(tabName) {
     btnGame?.classList.add("active");
 
     pokedexView?.classList.add("hidden");
+    rateView?.classList.add("hidden");
     profileView?.classList.add("hidden");
     progressSection?.classList.remove("hidden");
 
@@ -2604,6 +2664,346 @@ function switchMainTab(tabName) {
       setDvd3dMode(hasAnswerInCurrent);
     }
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+}
+
+// ============================================================================
+// 11B-2. PÁGINA DE AVALIAÇÃO DA QUINTA-FEIRA (IMDB DO OVAVAT — GOOGLE FORMS)
+// ============================================================================
+
+const FORM_VOTER_NAMES = [
+  "Derp",
+  "Fruet",
+  "Gio",
+  "Geizu",
+  "Gustavo",
+  "Jacom",
+  "Kobas",
+  "Raio",
+  "Tom",
+  "Outre"
+];
+
+function getSavedRateVoter() {
+  try {
+    const localSaved = localStorage.getItem(STORAGE_KEYS.FORM_VOTER);
+    if (localSaved && FORM_VOTER_NAMES.includes(localSaved)) {
+      return localSaved;
+    }
+  } catch (_) {}
+
+  try {
+    const st = getStats();
+    if (st && st.formVoterPicked && FORM_VOTER_NAMES.includes(st.formVoterPicked)) {
+      return st.formVoterPicked;
+    }
+  } catch (_) {}
+
+  return "";
+}
+
+function updateRateVoterUI(voterName) {
+  const displayVoter = voterName && FORM_VOTER_NAMES.includes(voterName) ? voterName : "Outre";
+  const pillLabel = document.getElementById("rate-voter-pill-label");
+  const pillBtn = document.getElementById("btn-rate-voter-picker");
+  if (pillLabel) {
+    pillLabel.textContent = displayVoter;
+  }
+  if (pillBtn) {
+    pillBtn.classList.toggle("has-voter", Boolean(getSavedRateVoter()));
+  }
+
+  document.querySelectorAll("#rate-names-grid .rate-name-chip").forEach(btn => {
+    const isSel = btn.getAttribute("data-name") === displayVoter;
+    btn.classList.toggle("active", isSel);
+  });
+}
+
+function openRateVoterModal() {
+  const activeVoter = state.rateSelectedVoter || "Outre";
+  document.querySelectorAll("#rate-names-grid .rate-name-chip").forEach(btn => {
+    const isSel = btn.getAttribute("data-name") === activeVoter;
+    btn.classList.toggle("active", isSel);
+  });
+  document.getElementById("modal-rate-voter")?.classList.remove("hidden");
+}
+
+function selectRateVoter(voterName, options = {}) {
+  const { persist = true, closeModal = false } = options;
+  const chosen = voterName && FORM_VOTER_NAMES.includes(voterName) ? voterName : "Outre";
+  state.rateSelectedVoter = chosen;
+
+  if (persist) {
+    try {
+      localStorage.setItem(STORAGE_KEYS.FORM_VOTER, chosen);
+    } catch (_) {}
+
+    const stats = getStats();
+    if (stats.formVoterPicked !== chosen) {
+      stats.formVoterPicked = chosen;
+      saveStats(stats);
+      if (state.profileSession) {
+        pushSaveToCloud();
+      }
+    }
+  }
+
+  updateRateVoterUI(chosen);
+
+  if (closeModal) {
+    document.getElementById("modal-rate-voter")?.classList.add("hidden");
+  }
+}
+
+function updateRateSliderUI(sliderId, val) {
+  const slider = document.getElementById(sliderId);
+  const numVal = Math.min(10, Math.max(0, Number(val) || 0));
+  if (slider) {
+    slider.value = String(numVal);
+    slider.style.setProperty("--slider-pct", `${numVal * 10}%`);
+  }
+
+  if (sliderId === "rate-slider-nota") {
+    const pill = document.getElementById("rate-val-nota");
+    if (pill) pill.textContent = String(numVal);
+    const starsEl = document.getElementById("rate-live-stars");
+    if (starsEl) {
+      starsEl.innerHTML = buildStarsSvgHtml(numVal / 2);
+    }
+  } else if (sliderId === "rate-slider-riso") {
+    const pill = document.getElementById("rate-val-riso");
+    if (pill) pill.textContent = String(numVal);
+  } else if (sliderId === "rate-slider-lacre") {
+    const pill = document.getElementById("rate-val-lacre");
+    if (pill) pill.textContent = String(numVal);
+  }
+
+  const ticksRow = document.querySelector(`.rate-ticks-row[data-target="${sliderId}"]`);
+  if (ticksRow) {
+    ticksRow.querySelectorAll(".rate-tick").forEach(btn => {
+      btn.classList.toggle("active", Number(btn.getAttribute("data-val")) === numVal);
+    });
+  }
+}
+
+function getVotedFormMovie() {
+  try {
+    const localMovie = localStorage.getItem(STORAGE_KEYS.FORM_VOTED_MOVIE);
+    if (localMovie && localMovie.trim().length >= 2) {
+      return localMovie.trim();
+    }
+  } catch (_) {}
+
+  try {
+    const st = getStats();
+    if (st && st.formVotedMovie && st.formVotedMovie.trim().length >= 2) {
+      return st.formVotedMovie.trim();
+    }
+  } catch (_) {}
+
+  return "";
+}
+
+function isCurrentRateMovieVoted() {
+  const currentMovie = (state.rateMovieTitle || "Nome Próprio").trim();
+  const votedMovie = getVotedFormMovie();
+  return Boolean(currentMovie && votedMovie && currentMovie === votedMovie);
+}
+
+function markRateMovieVoted(movieTitle) {
+  const cleanTitle = String(movieTitle || "").trim();
+  if (!cleanTitle) return;
+
+  try {
+    localStorage.setItem(STORAGE_KEYS.FORM_VOTED_MOVIE, cleanTitle);
+  } catch (_) {}
+
+  const stats = getStats();
+  if (stats.formVotedMovie !== cleanTitle) {
+    stats.formVotedMovie = cleanTitle;
+    saveStats(stats);
+    if (state.profileSession) {
+      pushSaveToCloud();
+    }
+  }
+}
+
+function renderRateMovieView() {
+  const movieName = state.rateMovieTitle || "Nome Próprio";
+  const titleEl = document.getElementById("rate-movie-title");
+  const imgEl = document.getElementById("rate-dvd-img");
+  const boxEl = document.getElementById("rate-dvd-box");
+  const formEl = document.getElementById("imdb-rate-form");
+  const votedCardEl = document.getElementById("rate-voted-card");
+  const votedMovieNameEl = document.getElementById("rate-voted-movie-name");
+  const voterPickerBtn = document.getElementById("btn-rate-voter-picker");
+
+  if (titleEl) {
+    titleEl.textContent = movieName;
+  }
+  if (votedMovieNameEl) {
+    votedMovieNameEl.textContent = movieName;
+  }
+
+  if (boxEl) {
+    boxEl.classList.remove("is-shiny", "is-foil", "is-especial");
+    const rarity = getMovieRarityTier(movieName);
+    if (rarity) boxEl.classList.add(`is-${rarity}`);
+  }
+
+  if (imgEl) {
+    const cachedUrl = state.posterMemoryCache[movieName];
+    if (cachedUrl) {
+      imgEl.src = cachedUrl;
+    } else {
+      imgEl.src = "assets/icon.jpg";
+    }
+    resolveMoviePoster(movieName).then(url => {
+      if (url && state.rateMovieTitle === movieName) {
+        imgEl.src = url;
+      }
+    });
+  }
+
+  const savedVoter = getSavedRateVoter();
+  if (savedVoter) {
+    selectRateVoter(savedVoter, { persist: false, closeModal: false });
+  } else {
+    state.rateSelectedVoter = "Outre";
+    updateRateVoterUI("Outre");
+  }
+
+  const alreadyVoted = isCurrentRateMovieVoted();
+  if (formEl) {
+    formEl.classList.toggle("hidden", alreadyVoted);
+  }
+  if (votedCardEl) {
+    votedCardEl.classList.toggle("hidden", !alreadyVoted);
+  }
+  if (voterPickerBtn) {
+    voterPickerBtn.disabled = alreadyVoted;
+    voterPickerBtn.classList.toggle("is-locked", alreadyVoted);
+  }
+
+  updateRateSliderUI("rate-slider-nota", document.getElementById("rate-slider-nota")?.value ?? 0);
+  updateRateSliderUI("rate-slider-riso", document.getElementById("rate-slider-riso")?.value ?? 0);
+  updateRateSliderUI("rate-slider-lacre", document.getElementById("rate-slider-lacre")?.value ?? 0);
+}
+
+function parseMovieFromFormText(rawText) {
+  if (!rawText) return null;
+  // 1. Formato FB_PUBLIC_LOAD_DATA_ do HTML original do Google Forms: 2042866862,[["Nome do Filme"
+  const fbMatch = rawText.match(/2042866862\s*,\s*\[\s*\[\s*"([^"]+)"/);
+  if (fbMatch && fbMatch[1]) {
+    return fbMatch[1].trim();
+  }
+  // 2. Formato Markdown do r.jina.ai: Filme 🎥 * ... <Nome do Filme> ... Nota⭐ *
+  const mdMatch = rawText.match(/Filme\s*🎥\s*\*?\s+([^\r\n*]+?)\s+Nota\s*⭐/i);
+  if (mdMatch && mdMatch[1]) {
+    return mdMatch[1].trim();
+  }
+  return null;
+}
+
+async function syncFormMovieFromGoogleForms() {
+  if (state.rateFetchingMovie) return;
+  state.rateFetchingMovie = true;
+
+  try {
+    let detectedMovie = null;
+
+    // Tentativa 1: r.jina.ai (rápido e com CORS liberado para GitHub Pages)
+    try {
+      const res = await fetch(`https://r.jina.ai/${GOOGLE_FORM_VIEW_URL}`, {
+        cache: "no-store"
+      });
+      if (res.ok) {
+        const text = await res.text();
+        detectedMovie = parseMovieFromFormText(text);
+      }
+    } catch (_) {}
+
+    // Tentativa 2: allorigins JSON
+    if (!detectedMovie) {
+      try {
+        const enc = encodeURIComponent(GOOGLE_FORM_VIEW_URL);
+        const res2 = await fetch(`https://api.allorigins.win/get?url=${enc}`, {
+          cache: "no-store"
+        });
+        if (res2.ok) {
+          const data = await res2.json();
+          detectedMovie = parseMovieFromFormText(data && data.contents);
+        }
+      } catch (_) {}
+    }
+
+    if (detectedMovie && detectedMovie.length >= 2) {
+      const changed = detectedMovie !== state.rateMovieTitle;
+      state.rateMovieTitle = detectedMovie;
+      try {
+        localStorage.setItem(STORAGE_KEYS.FORM_MOVIE, detectedMovie);
+      } catch (_) {}
+      if (changed && state.activeTab === "rate") {
+        renderRateMovieView();
+      }
+    }
+  } finally {
+    state.rateFetchingMovie = false;
+  }
+}
+
+async function handleRateFormSubmit(e) {
+  e.preventDefault();
+  if (!state.rateSelectedVoter) {
+    openRateVoterModal();
+    showToast("Escolha o seu nome para enviar! 👤");
+    return;
+  }
+
+  const movieTitle = state.rateMovieTitle || "Nome Próprio";
+  const nota = document.getElementById("rate-slider-nota")?.value ?? "0";
+  const riso = document.getElementById("rate-slider-riso")?.value ?? "0";
+  const lacre = document.getElementById("rate-slider-lacre")?.value ?? "0";
+  const critica = document.getElementById("rate-input-critica")?.value || "";
+  const submitBtn = document.getElementById("btn-rate-submit");
+  const submitText = document.getElementById("btn-rate-submit-text");
+
+  const params = new URLSearchParams();
+  params.append("entry.1666559163", state.rateSelectedVoter);
+  params.append("entry.2042866862", movieTitle);
+  params.append("entry.294792027", String(nota));
+  params.append("entry.1051937792", String(riso));
+  params.append("entry.1049319748", String(lacre));
+  params.append("entry.660204434", critica.trim());
+
+  if (submitBtn) submitBtn.disabled = true;
+  if (submitText) submitText.textContent = "Enviando avaliação...";
+
+  try {
+    await fetch(GOOGLE_FORM_RESPONSE_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: params.toString()
+    });
+
+    markRateMovieVoted(movieTitle);
+    showToast(`Avaliação de "${movieTitle}" enviada! 🎬`);
+    const criticaEl = document.getElementById("rate-input-critica");
+    if (criticaEl) criticaEl.value = "";
+    updateRateSliderUI("rate-slider-nota", 0);
+    updateRateSliderUI("rate-slider-riso", 0);
+    updateRateSliderUI("rate-slider-lacre", 0);
+    if (submitBtn) submitBtn.disabled = false;
+    if (submitText) submitText.textContent = "Enviar pro IMDb do Ovavat";
+    renderRateMovieView();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } catch (_) {
+    showToast("Erro de conexão ao enviar avaliação.");
+    if (submitBtn) submitBtn.disabled = false;
+    if (submitText) submitText.textContent = "Enviar pro IMDb do Ovavat";
   }
 }
 
@@ -3027,10 +3427,37 @@ function mergeCloudAndLocalData(cloudRow) {
   savePokedex();
 
   // 4. Recalcula as estatísticas gerais exclusivamente a partir do Desafio #1 (COLLECTION_START_DATE)
+  const resolvedFormVoter =
+    cloudStats.formVoterPicked || localStats.formVoterPicked || getSavedRateVoter() || null;
+  const curFormMovie = (state.rateMovieTitle || "Nome Próprio").trim();
+  let resolvedVotedMovie =
+    cloudStats.formVotedMovie || localStats.formVotedMovie || getVotedFormMovie() || null;
+  if (cloudStats.formVotedMovie === curFormMovie || localStats.formVotedMovie === curFormMovie) {
+    resolvedVotedMovie = curFormMovie;
+  }
+
   const mergedStats = sanitizeStatsObject({
-    history: mergedHistory
+    history: mergedHistory,
+    formVoterPicked: resolvedFormVoter,
+    formVotedMovie: resolvedVotedMovie
   });
   saveStats(mergedStats);
+
+  if (mergedStats.formVoterPicked) {
+    state.rateSelectedVoter = mergedStats.formVoterPicked;
+    try {
+      localStorage.setItem(STORAGE_KEYS.FORM_VOTER, mergedStats.formVoterPicked);
+    } catch (_) {}
+    updateRateVoterUI(mergedStats.formVoterPicked);
+  }
+  if (mergedStats.formVotedMovie) {
+    try {
+      localStorage.setItem(STORAGE_KEYS.FORM_VOTED_MOVIE, mergedStats.formVotedMovie);
+    } catch (_) {}
+  }
+  if (state.activeTab === "rate") {
+    renderRateMovieView();
+  }
 
   syncPokedexFromProgress();
   updateHeaderStats();
@@ -3467,13 +3894,14 @@ function bindEvents() {
     document.getElementById("modal-stats").classList.remove("hidden");
   });
 
-  // Navegação Liquid Glass (Jogo / Coleção / Perfil) com suporte a toque E arraste contínuo da gota líquida iOS 27
+  // Navegação Liquid Glass (Jogo / Coleção / Avaliar / Ranking) com suporte a toque E arraste contínuo da gota líquida iOS 27
   const navShell = document.getElementById("liquid-glass-shell");
   const navGlider = document.getElementById("liquid-glass-glider");
-  const navTabs = ["game", "pokedex", "profile"];
+  const navTabs = ["game", "pokedex", "rate", "profile"];
   const navButtons = [
     document.getElementById("nav-tab-game"),
     document.getElementById("nav-tab-pokedex"),
+    document.getElementById("nav-tab-rate"),
     document.getElementById("nav-tab-profile")
   ];
 
@@ -3488,7 +3916,8 @@ function bindEvents() {
 
   function getTabIdxFromName(tabName) {
     if (tabName === "pokedex") return 1;
-    if (tabName === "profile") return 2;
+    if (tabName === "rate") return 2;
+    if (tabName === "profile") return 3;
     return 0;
   }
 
@@ -3497,12 +3926,12 @@ function bindEvents() {
     const rect = navShell.getBoundingClientRect();
     const pad = 4;
     const innerWidth = Math.max(1, rect.width - pad * 2);
-    const pillWidth = innerWidth / 3;
+    const pillWidth = innerWidth / 4;
     // Posição do centro da pílula seguindo o dedo
     const rawIdx = (clientX - rect.left - pad - pillWidth / 2) / pillWidth;
     // Resistência elástica sutil nas extremidades (rubber-band iOS)
     if (rawIdx < 0) return Math.max(-0.12, rawIdx * 0.25);
-    if (rawIdx > 2) return Math.min(2.12, 2 + (rawIdx - 2) * 0.25);
+    if (rawIdx > 3) return Math.min(3.12, 3 + (rawIdx - 3) * 0.25);
     return rawIdx;
   }
 
@@ -3540,7 +3969,7 @@ function bindEvents() {
         const contIdx = computeContinuousIdxFromClientX(e.clientX);
         navDragState.currentIdx = contIdx;
         navGlider.style.setProperty("--glider-idx", contIdx.toFixed(3));
-        const nearest = Math.max(0, Math.min(2, Math.round(contIdx)));
+        const nearest = Math.max(0, Math.min(3, Math.round(contIdx)));
         highlightNavButtonAtIdx(nearest);
       }
     });
@@ -3557,7 +3986,7 @@ function bindEvents() {
         } catch (_) {}
         navDragState.suppressClickUntil = Date.now() + 250;
         navGlider.classList.remove("is-dragging");
-        const targetIdx = Math.max(0, Math.min(2, Math.round(navDragState.currentIdx)));
+        const targetIdx = Math.max(0, Math.min(3, Math.round(navDragState.currentIdx)));
         const targetTab = navTabs[targetIdx] || "game";
         switchMainTab(targetTab);
       } else if (e && e.type === "pointerup") {
@@ -3566,7 +3995,7 @@ function bindEvents() {
         let targetTab = btn ? btn.getAttribute("data-tab") : null;
         if (!targetTab) {
           const rect = navShell.getBoundingClientRect();
-          const slotIdx = Math.max(0, Math.min(2, Math.floor(((e.clientX - rect.left) / Math.max(1, rect.width)) * 3)));
+          const slotIdx = Math.max(0, Math.min(3, Math.floor(((e.clientX - rect.left) / Math.max(1, rect.width)) * 4)));
           targetTab = navTabs[slotIdx] || "game";
         }
         navDragState.suppressClickUntil = Date.now() + 250;
@@ -3586,10 +4015,35 @@ function bindEvents() {
     if (Date.now() < navDragState.suppressClickUntil) return;
     switchMainTab("pokedex");
   });
+  document.getElementById("nav-tab-rate")?.addEventListener("click", () => {
+    if (Date.now() < navDragState.suppressClickUntil) return;
+    switchMainTab("rate");
+  });
   document.getElementById("nav-tab-profile")?.addEventListener("click", () => {
     if (Date.now() < navDragState.suppressClickUntil) return;
     switchMainTab("profile");
   });
+
+  // Eventos da aba Avaliar Filme (IMDb do Ovavat — Google Forms)
+  document.getElementById("btn-rate-voter-picker")?.addEventListener("click", () => {
+    openRateVoterModal();
+  });
+
+  document.querySelectorAll("#rate-names-grid .rate-name-chip").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const name = btn.getAttribute("data-name") || "";
+      selectRateVoter(name, { persist: true, closeModal: true });
+    });
+  });
+
+  ["rate-slider-nota", "rate-slider-riso", "rate-slider-lacre"].forEach(sliderId => {
+    const sliderEl = document.getElementById(sliderId);
+    sliderEl?.addEventListener("input", () => {
+      updateRateSliderUI(sliderId, sliderEl.value);
+    });
+  });
+
+  document.getElementById("imdb-rate-form")?.addEventListener("submit", handleRateFormSubmit);
 
   // Eventos da aba Perfil (Login / Criar Conta / Sincronizar / Sair)
   document.getElementById("auth-tab-login")?.addEventListener("click", () => {
@@ -3666,6 +4120,14 @@ async function initApp() {
   state.shortDateStr = dateParts.brShort;
   state.editionNumber = computeEditionNumber(state.todayStr);
   state.posterMemoryCache = loadPosterCache();
+
+  try {
+    const cachedFormMovie = localStorage.getItem(STORAGE_KEYS.FORM_MOVIE);
+    if (cachedFormMovie && cachedFormMovie.trim().length >= 2) {
+      state.rateMovieTitle = cachedFormMovie.trim();
+    }
+  } catch (_) {}
+  syncFormMovieFromGoogleForms();
 
   bindEvents();
   startCountdownTimer();
