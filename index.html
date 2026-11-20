@@ -22,7 +22,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="styles.css?v=50" />
+  <link rel="stylesheet" href="styles.css?v=51" />
 </head>
 <body>
   <!-- Barra de Navegação Estilo iOS (Frosted Glass) -->
@@ -406,10 +406,20 @@
         <p class="rate-voted-text">
           Valeu pela review! Sua avaliação de <strong id="rate-voted-movie-name">Nome Próprio</strong> já foi enviada pro IMDb do Ovavat.
         </p>
-        <div class="rate-voted-pill">
-          <span>🎬</span>
-          <span>Liberado novamente quando o próximo filme entrar em cartaz</span>
-        </div>
+        <a
+          class="rate-sheet-btn"
+          href="https://docs.google.com/spreadsheets/d/1jLof436YQoJhEB3bz6xuI_d1dkoV4MtA0gqqW_9se_s/edit?pli=1&gid=1109015014#gid=1109015014"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect width="18" height="18" x="3" y="3" rx="2"></rect>
+            <path d="M3 9h18"></path>
+            <path d="M3 15h18"></path>
+            <path d="M9 3v18"></path>
+          </svg>
+          <span>Abrir Planilha</span>
+        </a>
       </div>
     </main>
 
@@ -802,8 +812,8 @@
   <!-- Toast de Notificação -->
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="posters-data.js?v=50"></script>
-  <script src="reviews-fallback.js?v=50"></script>
-  <script src="app.js?v=50"></script>
+  <script src="posters-data.js?v=51"></script>
+  <script src="reviews-fallback.js?v=51"></script>
+  <script src="app.js?v=51"></script>
 </body>
 </html>

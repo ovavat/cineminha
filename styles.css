@@ -3649,16 +3649,32 @@ html, body {
   font-weight: 700;
 }
 
-.rate-voted-pill {
-  margin-top: 6px;
-  padding: 8px 13px;
-  border-radius: 999px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-card);
-  color: var(--text-tertiary);
-  font-size: 0.75rem;
+.rate-sheet-btn {
+  margin-top: 8px;
+  width: 100%;
+  max-width: 280px;
+  height: 46px;
+  padding: 0 18px;
+  border-radius: 14px;
+  background: #34C759;
+  color: #FFFFFF;
+  font-family: var(--font-apple);
+  font-size: 0.92rem;
   font-weight: 700;
+  letter-spacing: -0.01em;
+  text-decoration: none;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 8px 20px -4px rgba(52, 199, 89, 0.42);
+  transition: transform 0.14s ease, filter 0.14s ease;
+}
+
+.rate-sheet-btn:hover {
+  filter: brightness(1.04);
+}
+
+.rate-sheet-btn:active {
+  transform: scale(0.97);
 }
