@@ -10,6 +10,7 @@ const GVIZ_JSONP_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/
 const TOTAL_PHASES = 5;
 const LAUNCH_DATE_STR = "2026-11-15"; // Desafio #1 oficial do Cineminha do Ovavat (histórico do beta anterior removido)
 const COLLECTION_START_DATE = "2026-11-15"; // Só considera partidas/filmes/acertos/streak a partir do Desafio #1
+const HINT_HALF_POINT_START_DATE = "2026-11-20"; // A partir de 20/11, acertos amarelos (2ª dica) valem 0.5 ponto no ranking
 
 const SUPABASE_URL = "https://riyvxpgyouxyljhfqknj.supabase.co";
 const SUPABASE_KEY = "sb_publishable_QkT0GDOivwCnfeBfVQ6nJw_e-CoJ_ic";
@@ -1655,8 +1656,13 @@ function sanitizeStatsObject(rawStats) {
   let prevDate = null;
 
   for (const dt of validDates) {
-    const sc = Math.min(5, Math.max(0, Number(cleanHist[dt].score) || 0));
-    totalCorrect += sc;
+    const entry = cleanHist[dt];
+    const sc = Math.min(5, Math.max(0, Math.round(Number(entry.score) || 0)));
+    const hints =
+      dt >= HINT_HALF_POINT_START_DATE && typeof entry.hintsUsed === "number"
+        ? Math.min(sc, Math.max(0, entry.hintsUsed))
+        : 0;
+    totalCorrect += sc - hints * 0.5;
     dist[sc] = (dist[sc] || 0) + 1;
 
     if (prevDate && getYesterdayIso(dt) === prevDate) {
@@ -1669,6 +1675,8 @@ function sanitizeStatsObject(rawStats) {
     }
     prevDate = dt;
   }
+
+  totalCorrect = Math.round(totalCorrect * 2) / 2;
 
   const lastCompletedDate = validDates.length > 0 ? validDates[validDates.length - 1] : null;
   const refToday = state.todayStr || getBrazilDateParts().iso;
@@ -1740,6 +1748,7 @@ function recordDailyCompletion(score) {
   const unlockedToday = state.answers
     .filter(a => a && a.correct && a.movie)
     .map(a => a.movie);
+  const hintsUsedToday = state.answers.filter(a => a && a.correct && a.usedHint).length;
 
   // Se já existe um jogo registrado hoje em stats.history com startedAt menor, preserva o primeiro!
   const existingEntry = stats.history[state.todayStr];
@@ -1751,6 +1760,7 @@ function recordDailyCompletion(score) {
   if (!existingEntry || startedAt <= existingTs) {
     stats.history[state.todayStr] = {
       score,
+      hintsUsed: hintsUsedToday,
       startedAt,
       movies: unlockedToday
     };
@@ -1905,6 +1915,7 @@ function syncPokedexFromProgress() {
             stats.history = {};
           }
           const dayScore = ansList.filter(a => a && a.correct).length;
+          const dayHintsUsed = ansList.filter(a => a && a.correct && a.usedHint).length;
           const dayMovies = ansList
             .map((a, i) => (a && a.correct ? getMovieFromAnswer(a, i, dailyDate) : null))
             .filter(Boolean);
@@ -1912,17 +1923,27 @@ function syncPokedexFromProgress() {
           if (!stats.history[dailyDate]) {
             stats.history[dailyDate] = {
               score: dayScore,
+              hintsUsed: dayHintsUsed,
               startedAt: dayTs,
               movies: dayMovies
             };
             saveStats(stats);
-          } else if (
-            typeof stats.history[dailyDate] === "object" &&
-            (!stats.history[dailyDate].movies || stats.history[dailyDate].movies.length === 0) &&
-            dayMovies.length > 0
-          ) {
-            stats.history[dailyDate].movies = dayMovies;
-            saveStats(stats);
+          } else if (typeof stats.history[dailyDate] === "object") {
+            let histUpdated = false;
+            if (
+              (!stats.history[dailyDate].movies || stats.history[dailyDate].movies.length === 0) &&
+              dayMovies.length > 0
+            ) {
+              stats.history[dailyDate].movies = dayMovies;
+              histUpdated = true;
+            }
+            if (typeof stats.history[dailyDate].hintsUsed !== "number") {
+              stats.history[dailyDate].hintsUsed = dayHintsUsed;
+              histUpdated = true;
+            }
+            if (histUpdated) {
+              saveStats(stats);
+            }
           }
         }
       }
@@ -3301,14 +3322,21 @@ function getSupabaseHeaders(extra = {}) {
 
 function normalizeHistoryEntry(rawEntry) {
   if (rawEntry && typeof rawEntry === "object") {
+    const score = Math.min(5, Math.max(0, Math.round(Number(rawEntry.score) || 0)));
+    const hintsUsed =
+      typeof rawEntry.hintsUsed === "number"
+        ? Math.min(score, Math.max(0, Math.round(rawEntry.hintsUsed)))
+        : null;
     return {
-      score: Math.min(5, Math.max(0, Number(rawEntry.score) || 0)),
+      score,
+      hintsUsed,
       startedAt: Number(rawEntry.startedAt) || Infinity,
       movies: Array.isArray(rawEntry.movies) ? rawEntry.movies : null
     };
   }
   return {
-    score: Math.min(5, Math.max(0, Number(rawEntry) || 0)),
+    score: Math.min(5, Math.max(0, Math.round(Number(rawEntry) || 0))),
+    hintsUsed: null,
     startedAt: Infinity,
     movies: null
   };
@@ -3718,7 +3746,7 @@ async function loadLeaderboardFromCloud() {
   if (!listEl) return;
 
   try {
-    const url = `${SUPABASE_URL}/rest/v1/profiles?select=username,display_name,stats,pokedex,updated_at&limit=50`;
+    const url = `${SUPABASE_URL}/rest/v1/profiles?select=username,display_name,stats,daily_progress,pokedex,updated_at&limit=50`;
     const res = await fetch(url, {
       method: "GET",
       headers: getSupabaseHeaders()
@@ -3734,15 +3762,47 @@ async function loadLeaderboardFromCloud() {
       const st = sanitizeStatsObject(r.stats);
       const pk = sanitizePokedexMap(r.pokedex);
       const dvds = Object.keys(pk).length;
-      const validHistCount = st.history ? Object.keys(st.history).length : 0;
-      const totalCorrect = validHistCount > 0 ? st.totalCorrect : dvds;
+      const histEntries = st.history ? Object.entries(st.history) : [];
+
+      let rankingPoints = 0;
+      if (histEntries.length > 0) {
+        for (const [dt, entry] of histEntries) {
+          const dayScore = Math.min(5, Math.max(0, Math.round(Number(entry.score) || 0)));
+          if (dt < HINT_HALF_POINT_START_DATE) {
+            // Antes de 20/11, todos os acertos (verdes ou amarelos) continuam valendo 1 ponto
+            rankingPoints += dayScore;
+          } else {
+            // A partir de 20/11, acertos amarelos (2ª dica) valem 0.5 ponto
+            let hints = 0;
+            if (typeof entry.hintsUsed === "number") {
+              hints = entry.hintsUsed;
+            } else if (
+              r.daily_progress &&
+              r.daily_progress.date === dt &&
+              Array.isArray(r.daily_progress.answers)
+            ) {
+              hints = r.daily_progress.answers.filter(a => a && a.correct && a.usedHint).length;
+            } else if (Array.isArray(entry.movies)) {
+              hints = entry.movies.filter(
+                mv => pk[mv] && pk[mv].unlockedAt === dt && pk[mv].usedHint
+              ).length;
+            }
+            hints = Math.min(dayScore, Math.max(0, hints));
+            rankingPoints += dayScore - hints * 0.5;
+          }
+        }
+        rankingPoints = Math.round(rankingPoints * 2) / 2;
+      } else {
+        rankingPoints = dvds;
+      }
+
       const streak = st.currentStreak || 0;
       return {
         username: r.username,
         displayName: r.display_name || r.username,
         streak,
         dvds,
-        totalCorrect
+        totalCorrect: rankingPoints
       };
     });
 
