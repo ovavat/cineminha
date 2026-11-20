@@ -26,7 +26,7 @@ const STORAGE_KEYS = {
   DAILY_PROGRESS: "ovavat_daily_v1",
   POKEDEX: "ovavat_pokedex_v2",
   PROFILE_SESSION: "ovavat_profile_session_v1",
-  SHEET_CACHE: "ovavat_sheet_cache_v7",
+  SHEET_CACHE: "ovavat_sheet_cache_v8",
   POSTER_CACHE: "ovavat_poster_cache_v9_wikidata_ptbr",
   THEME: "ovavat_theme_v2_light",
   PWA_DISMISSED_DATE: "ovavat_pwa_dismissed_v1",
@@ -554,6 +554,17 @@ function normalizeSheetAuthorToVoter(rawAuthor) {
   return null;
 }
 
+function normalizeCanonicalMovieTitle(rawTitle) {
+  const clean = String(rawTitle || "").trim();
+  if (clean === "A Herança (2024)") return "A Herança";
+  return clean;
+}
+
+function getLegacySeedMovieTitle(movieTitle) {
+  if (movieTitle === "A Herança") return "A Herança (2024)";
+  return movieTitle;
+}
+
 function parseGvizTable(table) {
   const rows = (table && table.rows) || [];
   const validReviews = [];
@@ -566,7 +577,7 @@ function parseGvizTable(table) {
     if (!c) continue;
 
     const dateFormatted = c[0] ? (c[0].f || String(c[0].v || "")).trim() : "";
-    const movie = c[1] && c[1].v != null ? String(c[1].v).trim() : "";
+    const movie = c[1] && c[1].v != null ? normalizeCanonicalMovieTitle(c[1].v) : "";
     const author = c[3] && c[3].v != null ? String(c[3].v).trim() : "Anônimo";
 
     if (!movie) continue;
@@ -941,10 +952,12 @@ function pickDayReviewsAvoidingRecent(reviewsPool, dayIso, blockedKeys) {
   const ranked = reviewsPool
     .slice()
     .sort((a, b) => {
-      const ha = cyrb32(`${daySeed}|rev|${a.movie}|${a.author}|${a.review}`);
-      const hb = cyrb32(`${daySeed}|rev|${b.movie}|${b.author}|${b.review}`);
+      const ma = getLegacySeedMovieTitle(a.movie);
+      const mb = getLegacySeedMovieTitle(b.movie);
+      const ha = cyrb32(`${daySeed}|rev|${ma}|${a.author}|${a.review}`);
+      const hb = cyrb32(`${daySeed}|rev|${mb}|${b.author}|${b.review}`);
       if (ha !== hb) return ha - hb;
-      return a.movie.localeCompare(b.movie);
+      return ma.localeCompare(mb);
     });
 
   const selected = [];
@@ -1072,15 +1085,23 @@ function buildDailyChallenge(reviews, allMovies, dateIso) {
   return selectedReviews.map((reviewObj, phaseIdx) => {
     const wrongPool = moviePool
       .filter(m => m !== reviewObj.movie)
-      .sort((a, b) => cyrb32(`${seedKey}|opt|${phaseIdx}|${a}`) - cyrb32(`${seedKey}|opt|${phaseIdx}|${b}`));
+      .sort(
+        (a, b) =>
+          cyrb32(`${seedKey}|opt|${phaseIdx}|${getLegacySeedMovieTitle(a)}`) -
+          cyrb32(`${seedKey}|opt|${phaseIdx}|${getLegacySeedMovieTitle(b)}`)
+      );
     const distractors = wrongPool.slice(0, 3);
     const options = [reviewObj.movie, ...distractors].sort(
-      (a, b) => cyrb32(`${seedKey}|slot|${phaseIdx}|${a}`) - cyrb32(`${seedKey}|slot|${phaseIdx}|${b}`)
+      (a, b) =>
+        cyrb32(`${seedKey}|slot|${phaseIdx}|${getLegacySeedMovieTitle(a)}`) -
+        cyrb32(`${seedKey}|slot|${phaseIdx}|${getLegacySeedMovieTitle(b)}`)
     );
     const correctIndex = options.indexOf(reviewObj.movie);
 
     // Review extra do mesmo filme (também evitando reviews usadas nos últimos 30 dias sempre que houver outra)
-    const extraRng = mulberry32(cyrb32(`${seedKey}-extra-reviews-${phaseIdx}-${reviewObj.movie}`));
+    const extraRng = mulberry32(
+      cyrb32(`${seedKey}-extra-reviews-${phaseIdx}-${getLegacySeedMovieTitle(reviewObj.movie)}`)
+    );
     const sameMovieOthers = pool.filter(
       r => r.movie === reviewObj.movie && r.review.trim() !== reviewObj.review.trim()
     );
@@ -1710,7 +1731,8 @@ function preloadDailyPosters() {
 function sanitizePokedexMap(rawPokedex) {
   const clean = {};
   if (!rawPokedex || typeof rawPokedex !== "object") return clean;
-  for (const [mv, info] of Object.entries(rawPokedex)) {
+  for (const [rawMv, info] of Object.entries(rawPokedex)) {
+    const mv = normalizeCanonicalMovieTitle(rawMv);
     if (!mv || !info || typeof info !== "object") continue;
     const unlockedAt = String(info.unlockedAt || "");
     if (unlockedAt && unlockedAt >= COLLECTION_START_DATE) {
@@ -1887,6 +1909,21 @@ function loadDailyProgress() {
     if (!raw) return null;
     const data = JSON.parse(raw);
     if (data && data.date === state.todayStr) {
+      let updated = false;
+      if (Array.isArray(data.answers)) {
+        data.answers.forEach(a => {
+          if (a && a.movie) {
+            const norm = normalizeCanonicalMovieTitle(a.movie);
+            if (norm !== a.movie) {
+              a.movie = norm;
+              updated = true;
+            }
+          }
+        });
+      }
+      if (updated) {
+        localStorage.setItem(STORAGE_KEYS.DAILY_PROGRESS, JSON.stringify(data));
+      }
       return data;
     }
   } catch (_) {}
@@ -1930,10 +1967,11 @@ function savePokedex() {
 }
 
 function unlockMovieInPokedex(movieName, usedHint = false, dateStr = state.todayStr) {
-  if (!movieName || !dateStr || dateStr < COLLECTION_START_DATE) return;
-  const existing = state.pokedex[movieName];
+  const cleanMovie = normalizeCanonicalMovieTitle(movieName);
+  if (!cleanMovie || !dateStr || dateStr < COLLECTION_START_DATE) return;
+  const existing = state.pokedex[cleanMovie];
   if (!existing) {
-    state.pokedex[movieName] = {
+    state.pokedex[cleanMovie] = {
       unlockedAt: dateStr,
       usedHint: Boolean(usedHint)
     };
@@ -1945,9 +1983,9 @@ function unlockMovieInPokedex(movieName, usedHint = false, dateStr = state.today
 
 function getMovieFromAnswer(ans, idx, dateStr) {
   if (!ans) return null;
-  if (ans.movie) return ans.movie;
+  if (ans.movie) return normalizeCanonicalMovieTitle(ans.movie);
   if (dateStr === state.todayStr && state.dailyPhases[idx]?.reviewObj?.movie) {
-    return state.dailyPhases[idx].reviewObj.movie;
+    return normalizeCanonicalMovieTitle(state.dailyPhases[idx].reviewObj.movie);
   }
   return null;
 }
@@ -3272,7 +3310,8 @@ async function handleRateFormSubmit(e) {
 
 function getMovieTitle(movieEntry) {
   if (!movieEntry) return "";
-  return typeof movieEntry === "string" ? movieEntry : String(movieEntry.title || "");
+  const raw = typeof movieEntry === "string" ? movieEntry : String(movieEntry.title || "");
+  return normalizeCanonicalMovieTitle(raw);
 }
 
 function getMovieRarityTier(movieName) {
@@ -3573,7 +3612,9 @@ function normalizeHistoryEntry(rawEntry) {
       score,
       hintsUsed,
       startedAt: Number(rawEntry.startedAt) || Infinity,
-      movies: Array.isArray(rawEntry.movies) ? rawEntry.movies : null
+      movies: Array.isArray(rawEntry.movies)
+        ? rawEntry.movies.map(normalizeCanonicalMovieTitle)
+        : null
     };
   }
   return {
