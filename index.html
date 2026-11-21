@@ -22,14 +22,26 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="styles.css?v=75" />
+  <link rel="stylesheet" href="styles.css?v=86" />
 </head>
 <body>
+  <!-- Fogos de Artifício de Ano Novo (30/12 a 01/01 — Fundo + Frente a cada 5s) -->
+  <canvas id="newyear-fireworks-canvas" class="newyear-fireworks-canvas" aria-hidden="true"></canvas>
+  <canvas id="newyear-fireworks-front-canvas" class="newyear-fireworks-canvas is-front" aria-hidden="true"></canvas>
+
+  <!-- Intro Especial de 1º de Janeiro (1ª vez que abre o app no Ano Novo) -->
+  <div id="newyear-intro-overlay" class="newyear-intro-overlay hidden" role="dialog" aria-modal="true" aria-label="Feliz Ano Novo 2027">
+    <canvas id="newyear-intro-canvas" class="newyear-intro-canvas" aria-hidden="true"></canvas>
+    <div class="newyear-intro-stage">
+      <div class="newyear-intro-year" id="newyear-intro-year">2027</div>
+      <div class="newyear-intro-greeting" id="newyear-intro-greeting">Feliz Ano Novo!</div>
+      <button type="button" class="newyear-intro-btn" id="btn-newyear-intro-close">Jogar</button>
+    </div>
+  </div>
   <!-- Barra de Navegação Estilo iOS (Frosted Glass) -->
   <header class="ios-navbar">
     <div class="ios-navbar-inner">
       <div class="brand">
-        <!-- Botão secreto no ícone para abrir o reset de teste -->
         <button class="app-icon-btn" id="brand-icon-trigger" type="button" aria-label="Cineminha do Ovavat">
           <img
             id="brand-icon"
@@ -76,6 +88,37 @@
           </svg>
         </button>
       </div>
+    </div>
+    <!-- Fio de Pisca-pisca Natalino na linha divisória da Navbar (de canto a canto da tela) -->
+    <div class="xmas-lights-bar" aria-hidden="true">
+      <span class="xmas-bulb bulb-red"></span>
+      <span class="xmas-bulb bulb-gold"></span>
+      <span class="xmas-bulb bulb-green"></span>
+      <span class="xmas-bulb bulb-purple"></span>
+      <span class="xmas-bulb bulb-red"></span>
+      <span class="xmas-bulb bulb-gold"></span>
+      <span class="xmas-bulb bulb-green"></span>
+      <span class="xmas-bulb bulb-purple"></span>
+      <span class="xmas-bulb bulb-red"></span>
+      <span class="xmas-bulb bulb-gold"></span>
+      <span class="xmas-bulb bulb-green"></span>
+      <span class="xmas-bulb bulb-purple"></span>
+      <span class="xmas-bulb bulb-red"></span>
+      <span class="xmas-bulb bulb-gold"></span>
+      <span class="xmas-bulb bulb-green"></span>
+      <span class="xmas-bulb bulb-purple"></span>
+      <span class="xmas-bulb bulb-red desktop-only-bulb"></span>
+      <span class="xmas-bulb bulb-gold desktop-only-bulb"></span>
+      <span class="xmas-bulb bulb-green desktop-only-bulb"></span>
+      <span class="xmas-bulb bulb-purple desktop-only-bulb"></span>
+      <span class="xmas-bulb bulb-red desktop-only-bulb"></span>
+      <span class="xmas-bulb bulb-gold desktop-only-bulb"></span>
+      <span class="xmas-bulb bulb-green desktop-only-bulb"></span>
+      <span class="xmas-bulb bulb-purple desktop-only-bulb"></span>
+      <span class="xmas-bulb bulb-red desktop-only-bulb"></span>
+      <span class="xmas-bulb bulb-gold desktop-only-bulb"></span>
+      <span class="xmas-bulb bulb-green desktop-only-bulb"></span>
+      <span class="xmas-bulb bulb-purple desktop-only-bulb"></span>
     </div>
   </header>
 
@@ -796,8 +839,8 @@
   <!-- Toast de Notificação -->
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
-  <script src="posters-data.js?v=75"></script>
-  <script src="reviews-fallback.js?v=75"></script>
-  <script src="app.js?v=75"></script>
+  <script src="posters-data.js?v=86"></script>
+  <script src="reviews-fallback.js?v=86"></script>
+  <script src="app.js?v=86"></script>
 </body>
 </html>

@@ -32,7 +32,8 @@ const STORAGE_KEYS = {
   PWA_DISMISSED_DATE: "ovavat_pwa_dismissed_v1",
   FORM_MOVIE: "ovavat_form_movie_v1",
   FORM_VOTER: "ovavat_form_voter_v2_popup",
-  FORM_VOTED_MOVIE: "ovavat_form_voted_movie_v1"
+  FORM_VOTED_MOVIE: "ovavat_form_voted_movie_v1",
+  NY_INTRO_SEEN_YEAR: "ovavat_ny_intro_seen_year_v1"
 };
 
 // Estado em memória
@@ -4460,6 +4461,458 @@ function bindEvents() {
   });
 }
 
+const NEW_YEAR_TEST_PREVIEW = false;
+
+function isXmasSeasonActive(isoDate) {
+  if (!isoDate) return false;
+  const parts = String(isoDate).split("-").map(Number);
+  if (parts.length < 3) return false;
+  const [, month, day] = parts;
+  // Ativo automaticamente de 22 de novembro até 25 de dezembro (volta ao normal em 26/12)
+  if (month === 11 && day >= 22) return true;
+  if (month === 12 && day <= 25) return true;
+  return false;
+}
+
+function isNewYearSeasonActive(isoDate) {
+  if (NEW_YEAR_TEST_PREVIEW) return true;
+  if (!isoDate) return false;
+  const parts = String(isoDate).split("-").map(Number);
+  if (parts.length < 3) return false;
+  const [, month, day] = parts;
+  // Ativo automaticamente de 30 de dezembro até 1 de janeiro (volta ao normal em 02/01)
+  if (month === 12 && day >= 30) return true;
+  if (month === 1 && day === 1) return true;
+  return false;
+}
+
+function initNewYearFireworks() {
+  if (!document.body.classList.contains("newyear-mode")) return;
+  const bgCanvas = document.getElementById("newyear-fireworks-canvas");
+  const fgCanvas = document.getElementById("newyear-fireworks-front-canvas");
+  if (!bgCanvas) return;
+  const bgCtx = bgCanvas.getContext("2d");
+  const fgCtx = fgCanvas ? fgCanvas.getContext("2d") : null;
+  if (!bgCtx) return;
+
+  let width = 0;
+  let height = 0;
+  function resize() {
+    width = window.innerWidth;
+    height = window.innerHeight;
+    bgCanvas.width = width;
+    bgCanvas.height = height;
+    if (fgCanvas) {
+      fgCanvas.width = width;
+      fgCanvas.height = height;
+    }
+  }
+  resize();
+  window.addEventListener("resize", resize);
+
+  // Paleta 100% Roxo-Ovavat
+  const OVAVAT_PURPLE_PALETTE = [
+    "#AD39C2",
+    "#C456D9",
+    "#D946EF",
+    "#E879F9",
+    "#F0ABFC",
+    "#9333EA"
+  ];
+
+  const rockets = [];
+  const sparks = [];
+  let nextBgLaunchAt = 0;
+  let nextFgLaunchAt = performance.now() + 5000;
+  let launchLowNext = false;
+
+  function spawnRocket(isFront = false, forceLow = null) {
+    const isLow = forceLow !== null ? forceLow : launchLowNext;
+    launchLowNext = !launchLowNext;
+
+    const x = width * (0.12 + Math.random() * 0.76);
+    // Alterna entre explodir lá no topo (8%..28%) e embaixo (62%..84%)
+    const targetY = isLow
+      ? height * (0.62 + Math.random() * 0.22)
+      : height * (0.08 + Math.random() * 0.2);
+    const startY = height + 10;
+    const travelDist = Math.max(110, startY - targetY);
+    const speed = Math.max(6.5, travelDist * 0.017 + Math.random() * 1.3);
+    rockets.push({
+      x,
+      y: startY,
+      vx: (Math.random() - 0.5) * 1.0,
+      vy: -speed,
+      targetY,
+      palette: OVAVAT_PURPLE_PALETTE,
+      isFront,
+      trail: []
+    });
+  }
+
+  function explodeRocket(r) {
+    const count = 38 + Math.floor(Math.random() * 18);
+    for (let i = 0; i < count; i++) {
+      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.18;
+      const speed = 1.2 + Math.random() * 3.6;
+      const color = r.palette[Math.floor(Math.random() * r.palette.length)];
+      sparks.push({
+        x: r.x,
+        y: r.y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        alpha: 1,
+        decay: 0.013 + Math.random() * 0.011,
+        size: 1.6 + Math.random() * 1.8,
+        color,
+        isFront: r.isFront
+      });
+    }
+  }
+
+  function step(now) {
+    bgCtx.clearRect(0, 0, width, height);
+    if (fgCtx) fgCtx.clearRect(0, 0, width, height);
+
+    if (now >= nextBgLaunchAt && rockets.filter(r => !r.isFront).length < 4) {
+      spawnRocket(false);
+      nextBgLaunchAt = now + 550 + Math.random() * 850;
+    }
+
+    // A cada 5 segundos exatos, lança 1 fogo na camada da frente dos elementos
+    if (fgCtx && now >= nextFgLaunchAt) {
+      spawnRocket(true);
+      nextFgLaunchAt = now + 5000;
+    }
+
+    for (let i = rockets.length - 1; i >= 0; i--) {
+      const r = rockets[i];
+      const ctx = r.isFront && fgCtx ? fgCtx : bgCtx;
+
+      r.trail.push({ x: r.x, y: r.y });
+      if (r.trail.length > 8) r.trail.shift();
+
+      r.x += r.vx;
+      r.y += r.vy;
+      r.vy *= 0.992;
+
+      for (let t = 0; t < r.trail.length; t++) {
+        const pt = r.trail[t];
+        const ratio = (t + 1) / r.trail.length;
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 1.5 * ratio, 0, Math.PI * 2);
+        ctx.fillStyle = r.palette[1];
+        ctx.globalAlpha = ratio * 0.6;
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+
+      if (r.y <= r.targetY || r.vy > -1.8) {
+        explodeRocket(r);
+        rockets.splice(i, 1);
+      }
+    }
+
+    for (let i = sparks.length - 1; i >= 0; i--) {
+      const s = sparks[i];
+      const ctx = s.isFront && fgCtx ? fgCtx : bgCtx;
+
+      s.x += s.vx;
+      s.y += s.vy;
+      s.vx *= 0.965;
+      s.vy = s.vy * 0.965 + 0.04;
+      s.alpha -= s.decay;
+
+      if (s.alpha <= 0) {
+        sparks.splice(i, 1);
+        continue;
+      }
+
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+      ctx.fillStyle = s.color;
+      ctx.globalAlpha = Math.max(0, s.alpha * 0.88);
+      ctx.fill();
+    }
+    bgCtx.globalAlpha = 1;
+    if (fgCtx) fgCtx.globalAlpha = 1;
+
+    requestAnimationFrame(step);
+  }
+
+  requestAnimationFrame(step);
+}
+
+function shouldShowJan1Intro(isoDate) {
+  if (NEW_YEAR_TEST_PREVIEW) return true;
+  if (!isoDate) return false;
+  const parts = String(isoDate).split("-").map(Number);
+  if (parts.length < 3) return false;
+  const [year, month, day] = parts;
+  // Aparece apenas no dia 1º de janeiro, na primeira vez que a pessoa abrir o app naquele ano
+  if (month !== 1 || day !== 1) return false;
+  try {
+    const seenYear = localStorage.getItem(STORAGE_KEYS.NY_INTRO_SEEN_YEAR);
+    if (seenYear === String(year)) return false;
+  } catch (_) {}
+  return true;
+}
+
+function initJan1NewYearIntro(isoDate) {
+  if (!shouldShowJan1Intro(isoDate)) return;
+
+  const overlay = document.getElementById("newyear-intro-overlay");
+  const canvas = document.getElementById("newyear-intro-canvas");
+  const yearEl = document.getElementById("newyear-intro-year");
+  const greetingEl = document.getElementById("newyear-intro-greeting");
+  const closeBtn = document.getElementById("btn-newyear-intro-close");
+  if (!overlay || !canvas || !yearEl || !greetingEl) return;
+
+  const parts = String(isoDate || "").split("-").map(Number);
+  const displayYear = parts[0] && parts[1] === 1 ? parts[0] : 2027;
+  yearEl.textContent = String(displayYear);
+
+  overlay.classList.remove("hidden", "is-closing");
+  yearEl.classList.remove("is-visible");
+  greetingEl.classList.remove("is-visible");
+  closeBtn?.classList.remove("is-visible");
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  let width = 0;
+  let height = 0;
+  function resize() {
+    width = window.innerWidth;
+    height = window.innerHeight;
+    canvas.width = width;
+    canvas.height = height;
+  }
+  resize();
+  window.addEventListener("resize", resize);
+
+  const PALETTE = ["#AD39C2", "#C456D9", "#D946EF", "#E879F9", "#F5D0FE", "#FFFFFF"];
+  const targetX = () => width * 0.5;
+  const targetY = () => height * 0.38;
+
+  let rocket = {
+    x: width * 0.5,
+    y: height + 12,
+    vy: -Math.max(14.5, (height * 0.62) * 0.028),
+    trail: [],
+    exploded: false
+  };
+  let flashAlpha = 0;
+  const sparks = [];
+  const ambientRockets = [];
+  let nextAmbientLaunchAt = Infinity;
+  let ambientLowNext = false;
+  let canDismiss = false;
+  let closed = false;
+
+  function spawnAmbientRocket() {
+    const isLow = ambientLowNext;
+    ambientLowNext = !ambientLowNext;
+    const rx = width * (0.12 + Math.random() * 0.76);
+    const rTargetY = isLow
+      ? height * (0.62 + Math.random() * 0.22)
+      : height * (0.08 + Math.random() * 0.2);
+    const startY = height + 10;
+    const travelDist = Math.max(110, startY - rTargetY);
+    const speed = Math.max(6.5, travelDist * 0.017 + Math.random() * 1.3);
+    ambientRockets.push({
+      x: rx,
+      y: startY,
+      vx: (Math.random() - 0.5) * 1.0,
+      vy: -speed,
+      targetY: rTargetY,
+      trail: []
+    });
+  }
+
+  function explodeAmbientRocket(ar) {
+    const count = 38 + Math.floor(Math.random() * 18);
+    for (let i = 0; i < count; i++) {
+      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.18;
+      const speed = 1.2 + Math.random() * 3.6;
+      const color = PALETTE[Math.floor(Math.random() * (PALETTE.length - 1))];
+      sparks.push({
+        x: ar.x,
+        y: ar.y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        alpha: 1,
+        decay: 0.013 + Math.random() * 0.011,
+        size: 1.6 + Math.random() * 1.8,
+        color
+      });
+    }
+  }
+
+  function triggerHeroExplosion(x, y) {
+    rocket.exploded = true;
+    flashAlpha = 0.65;
+
+    // Anel duplo de partículas roxo-Ovavat + brilho lilás claro
+    const total = 115;
+    for (let i = 0; i < total; i++) {
+      const angle = (Math.PI * 2 * i) / total + (Math.random() - 0.5) * 0.12;
+      const ringSpeed = i % 3 === 0 ? 1.5 + Math.random() * 2.2 : 2.8 + Math.random() * 4.4;
+      const color = PALETTE[Math.floor(Math.random() * PALETTE.length)];
+      sparks.push({
+        x,
+        y,
+        vx: Math.cos(angle) * ringSpeed,
+        vy: Math.sin(angle) * ringSpeed,
+        alpha: 1,
+        decay: 0.0085 + Math.random() * 0.009,
+        size: 1.7 + Math.random() * 2.2,
+        color
+      });
+    }
+
+    // Revela o "2027" imediatamente no exato instante da explosão
+    yearEl.classList.add("is-visible");
+
+    // Logo em seguida aparece "Feliz Ano Novo!" e o botão "Jogar"
+    setTimeout(() => {
+      greetingEl.classList.add("is-visible");
+    }, 200);
+
+    setTimeout(() => {
+      closeBtn?.classList.add("is-visible");
+      canDismiss = true;
+      nextAmbientLaunchAt = performance.now();
+    }, 420);
+  }
+
+  function dismissIntro() {
+    if (closed || !canDismiss) return;
+    closed = true;
+    try {
+      if (!NEW_YEAR_TEST_PREVIEW) {
+        localStorage.setItem(STORAGE_KEYS.NY_INTRO_SEEN_YEAR, String(displayYear));
+      }
+    } catch (_) {}
+    overlay.classList.add("is-closing");
+    setTimeout(() => {
+      overlay.classList.add("hidden");
+    }, 480);
+  }
+
+  closeBtn?.addEventListener("click", e => {
+    e.stopPropagation();
+    dismissIntro();
+  });
+  overlay.addEventListener("click", () => {
+    if (canDismiss) dismissIntro();
+  });
+
+  function step(now) {
+    if (closed && overlay.classList.contains("hidden")) return;
+    ctx.clearRect(0, 0, width, height);
+
+    if (canDismiss && now >= nextAmbientLaunchAt && ambientRockets.length < 4) {
+      spawnAmbientRocket();
+      nextAmbientLaunchAt = now + 500 + Math.random() * 800;
+    }
+
+    for (let i = ambientRockets.length - 1; i >= 0; i--) {
+      const ar = ambientRockets[i];
+      ar.trail.push({ x: ar.x, y: ar.y });
+      if (ar.trail.length > 8) ar.trail.shift();
+
+      ar.x += ar.vx;
+      ar.y += ar.vy;
+      ar.vy *= 0.992;
+
+      for (let t = 0; t < ar.trail.length; t++) {
+        const pt = ar.trail[t];
+        const ratio = (t + 1) / ar.trail.length;
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 1.5 * ratio, 0, Math.PI * 2);
+        ctx.fillStyle = PALETTE[1];
+        ctx.globalAlpha = ratio * 0.6;
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+
+      if (ar.y <= ar.targetY || ar.vy > -1.8) {
+        explodeAmbientRocket(ar);
+        ambientRockets.splice(i, 1);
+      }
+    }
+
+    if (!rocket.exploded) {
+      rocket.x = targetX();
+      rocket.trail.push({ x: rocket.x, y: rocket.y });
+      if (rocket.trail.length > 12) rocket.trail.shift();
+
+      rocket.y += rocket.vy;
+      rocket.vy *= 0.99;
+
+      for (let t = 0; t < rocket.trail.length; t++) {
+        const pt = rocket.trail[t];
+        const ratio = (t + 1) / rocket.trail.length;
+        ctx.beginPath();
+        ctx.arc(pt.x + (Math.random() - 0.5) * 1.5, pt.y, 2.4 * ratio, 0, Math.PI * 2);
+        ctx.fillStyle = t > rocket.trail.length - 3 ? "#F5D0FE" : "#C456D9";
+        ctx.globalAlpha = ratio * 0.85;
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+
+      if (rocket.y <= targetY() || rocket.vy > -2.0) {
+        triggerHeroExplosion(rocket.x, targetY());
+      }
+    }
+
+    if (flashAlpha > 0) {
+      const grad = ctx.createRadialGradient(
+        targetX(),
+        targetY(),
+        4,
+        targetX(),
+        targetY(),
+        180
+      );
+      grad.addColorStop(0, `rgba(245, 208, 254, ${flashAlpha})`);
+      grad.addColorStop(0.45, `rgba(196, 86, 217, ${flashAlpha * 0.45})`);
+      grad.addColorStop(1, "rgba(173, 57, 194, 0)");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(targetX(), targetY(), 180, 0, Math.PI * 2);
+      ctx.fill();
+      flashAlpha = Math.max(0, flashAlpha - 0.032);
+    }
+
+    for (let i = sparks.length - 1; i >= 0; i--) {
+      const s = sparks[i];
+      s.x += s.vx;
+      s.y += s.vy;
+      s.vx *= 0.968;
+      s.vy = s.vy * 0.968 + 0.035;
+      s.alpha -= s.decay;
+
+      if (s.alpha <= 0) {
+        sparks.splice(i, 1);
+        continue;
+      }
+
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+      ctx.fillStyle = s.color;
+      ctx.globalAlpha = Math.max(0, s.alpha);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    requestAnimationFrame(step);
+  }
+
+  requestAnimationFrame(step);
+}
+
 async function initApp() {
   initTheme();
   initDvd3dInteractions();
@@ -4469,6 +4922,10 @@ async function initApp() {
   state.displayDateStr = dateParts.brFull;
   state.shortDateStr = dateParts.brShort;
   state.editionNumber = computeEditionNumber(state.todayStr);
+  document.body.classList.toggle("xmas-mode", isXmasSeasonActive(state.todayStr));
+  document.body.classList.toggle("newyear-mode", isNewYearSeasonActive(state.todayStr));
+  initNewYearFireworks();
+  initJan1NewYearIntro(state.todayStr);
   state.posterMemoryCache = loadPosterCache();
 
   try {
