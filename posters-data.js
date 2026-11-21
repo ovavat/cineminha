@@ -3,10 +3,12 @@ window.OVAVAT_POSTERS = {
   "Nome Próprio": "https://m.media-amazon.com/images/M/MV5BMjdlNjNmMjEtZmNhNC00ZjA1LWIwYTYtN2RmNWIwODg5NTEwXkEyXkFqcGc@._V1_SX500.jpg",
   "Transe": "https://m.media-amazon.com/images/M/MV5BODJlNjdiOTQtY2NkNC00NGE2LWE3MGMtOTE5OWM5MWIzYjNlXkEyXkFqcGc@._V1_SX500.jpg",
   "Abrigo Nuclear": "https://m.media-amazon.com/images/M/MV5BMGMxMjdhMTItZGU2MS00YzY2LTgxZmUtMmRmZTY1YTBhYmUwXkEyXkFqcGc@._V1_SX500.jpg",
-  "A Herança": "https://m.media-amazon.com/images/M/MV5BNmEwYTFjMjktMTdjNS00NzQ5LTlhMGUtNzIxNTA4M2RhNjcwXkEyXkFqcGc@._V1_SX500.jpg"
+  "A Herança": "https://m.media-amazon.com/images/M/MV5BNmEwYTFjMjktMTdjNS00NzQ5LTlhMGUtNzIxNTA4M2RhNjcwXkEyXkFqcGc@._V1_SX500.jpg",
+  "Casa Grande": "https://m.media-amazon.com/images/M/MV5BMTk0MTI4OTQ5NV5BMl5BanBnXkFtZTgwMzU5NzQyNzE@._V1_SX500.jpg"
 };
 
 window.OVAVAT_MOVIE_SEARCH_HINTS = {
+  "Casa Grande": "Casa Grande (filme)",
   "Abrigo Nuclear": "Abrigo Nuclear (filme)",
   "Os 3": "Os 3 (filme)",
   "B.O.": "Boletim de Ocorrência (filme)",

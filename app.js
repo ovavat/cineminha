@@ -26,7 +26,7 @@ const STORAGE_KEYS = {
   DAILY_PROGRESS: "ovavat_daily_v1",
   POKEDEX: "ovavat_pokedex_v2",
   PROFILE_SESSION: "ovavat_profile_session_v1",
-  SHEET_CACHE: "ovavat_sheet_cache_v8",
+  SHEET_CACHE: "ovavat_sheet_cache_v9",
   POSTER_CACHE: "ovavat_poster_cache_v9_wikidata_ptbr",
   THEME: "ovavat_theme_v2_light",
   PWA_DISMISSED_DATE: "ovavat_pwa_dismissed_v1",
@@ -557,11 +557,13 @@ function normalizeSheetAuthorToVoter(rawAuthor) {
 function normalizeCanonicalMovieTitle(rawTitle) {
   const clean = String(rawTitle || "").trim();
   if (clean === "A Herança (2024)") return "A Herança";
+  if (clean === "Casa Grande (2014)") return "Casa Grande";
   return clean;
 }
 
 function getLegacySeedMovieTitle(movieTitle) {
   if (movieTitle === "A Herança") return "A Herança (2024)";
+  if (movieTitle === "Casa Grande") return "Casa Grande (2014)";
   return movieTitle;
 }
 
