@@ -3283,14 +3283,6 @@ html, body {
   letter-spacing: -0.005em;
 }
 
-.leaderboard-scoring-legend::before,
-.leaderboard-scoring-legend::after {
-  content: "";
-  flex: 1;
-  height: 0.5px;
-  background: var(--separator);
-}
-
 .leaderboard-scoring-legend .legend-dot {
   opacity: 0.6;
 }
