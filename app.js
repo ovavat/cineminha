@@ -401,6 +401,18 @@ function setDvd3dMode(enable3D) {
 // ============================================================================
 
 function getBrazilDateParts() {
+  const now = new Date();
+  const year = String(now.getFullYear());
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return {
+    iso: `${year}-${month}-${day}`,
+    brFull: `${day}/${month}/${year}`,
+    brShort: `${day}/${month}`
+  };
+}
+
+function getBrazilIsoToday() {
   try {
     const formatter = new Intl.DateTimeFormat("pt-BR", {
       timeZone: "America/Sao_Paulo",
@@ -412,21 +424,9 @@ function getBrazilDateParts() {
     const day = parts.find(p => p.type === "day").value;
     const month = parts.find(p => p.type === "month").value;
     const year = parts.find(p => p.type === "year").value;
-    return {
-      iso: `${year}-${month}-${day}`,
-      brFull: `${day}/${month}/${year}`,
-      brShort: `${day}/${month}`
-    };
-  } catch (e) {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, "0");
-    const d = String(now.getDate()).padStart(2, "0");
-    return {
-      iso: `${y}-${m}-${d}`,
-      brFull: `${d}/${m}/${y}`,
-      brShort: `${d}/${m}`
-    };
+    return `${year}-${month}-${day}`;
+  } catch (_) {
+    return getBrazilDateParts().iso;
   }
 }
 
@@ -1883,11 +1883,12 @@ function sanitizeStatsObject(rawStats) {
   const lastCompletedDate = validDates.length > 0 ? validDates[validDates.length - 1] : null;
   const refToday = state.todayStr || getBrazilDateParts().iso;
   const refYesterday = getYesterdayIso(refToday);
+  const brYesterday = getYesterdayIso(getBrazilIsoToday());
+  const cutoffYesterday = refYesterday < brYesterday ? refYesterday : brYesterday;
 
-  // Se a pessoa não jogou nem hoje nem ontem, a streak foi perdida e zera (0) nela e no ranking!
+  // Se a pessoa não jogou nem hoje nem ontem (respeitando fusos adiantados como Japão e o fuso do Brasil), a streak zera
   const isStreakAlive = Boolean(
-    lastCompletedDate &&
-    (lastCompletedDate === refToday || lastCompletedDate === refYesterday)
+    lastCompletedDate && lastCompletedDate >= cutoffYesterday
   );
 
   const currentStreak = isStreakAlive ? histStreak : 0;
