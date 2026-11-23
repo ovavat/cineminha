@@ -11,6 +11,8 @@ const TOTAL_PHASES = 5;
 const LAUNCH_DATE_STR = "2026-11-15"; // Desafio #1 oficial do Cineminha do Ovavat (histórico do beta anterior removido)
 const COLLECTION_START_DATE = "2026-11-15"; // Só considera partidas/filmes/acertos/streak a partir do Desafio #1
 const HINT_HALF_POINT_START_DATE = "2026-11-20"; // A partir de 20/11, acertos amarelos (2ª dica) valem 0.5 ponto no ranking
+const MOVIE_LIMIT_RULE_START_DATE = "2026-11-24"; // A partir de 24/11, um filme não pode aparecer >2x no mês nem como alternativa após 2x
+const MAX_MOVIE_ANSWERS_PER_MONTH = 2;
 
 const SUPABASE_URL = "https://riyvxpgyouxyljhfqknj.supabase.co";
 const SUPABASE_KEY = "sb_publishable_QkT0GDOivwCnfeBfVQ6nJw_e-CoJ_ic";
@@ -793,6 +795,15 @@ function stripAccentsWithMap(str) {
   return { norm, map };
 }
 
+const GENERIC_SUBTITLE_STOPWORDS = new Set([
+  "filme",
+  "o filme",
+  "filmes",
+  "os filmes",
+  "filmis",
+  "o filmis"
+]);
+
 function buildSearchTermsForMovie(movieTitle) {
   const terms = new Set();
   const clean = movieTitle.trim();
@@ -802,6 +813,15 @@ function buildSearchTermsForMovie(movieTitle) {
 
   const noPunct = clean.replace(/[!?.,]+$/g, "").trim();
   if (noPunct.length >= 3) terms.add(noPunct);
+
+  // Também adiciona o título completo sem dois-pontos/vírgula/traço (ex: "Menino Maluquinho O Filme")
+  // para censurar tudo junto mesmo se a pessoa não tiver digitado os dois-pontos na review
+  const noInternalPunct = noPunct.replace(/[:\-–,]+/g, " ").replace(/\s+/g, " ").trim();
+  if (noInternalPunct.length >= 4) {
+    terms.add(noInternalPunct);
+    const noInternalNoArt = noInternalPunct.replace(/^(o|a|os|as|um|uma)\s+/i, "").trim();
+    if (noInternalNoArt.length >= 4) terms.add(noInternalNoArt);
+  }
 
   const withoutArticle = noPunct.replace(/^(o|a|os|as|um|uma)\s+/i, "").trim();
   if (withoutArticle.length >= 4) {
@@ -815,16 +835,22 @@ function buildSearchTermsForMovie(movieTitle) {
 
   const segments = clean.split(/[:\-–,]/).map(s => s.trim()).filter(Boolean);
   for (const seg of segments) {
+    const segNorm = seg.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+    if (GENERIC_SUBTITLE_STOPWORDS.has(segNorm)) continue;
+
     if (seg.length >= 4) {
       terms.add(seg);
       const segNoArt = seg.replace(/^(o|a|os|as|um|uma)\s+/i, "").trim();
-      if (segNoArt.length >= 5) terms.add(segNoArt);
+      const segNoArtNorm = segNoArt.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+      if (segNoArt.length >= 5 && !GENERIC_SUBTITLE_STOPWORDS.has(segNoArtNorm)) {
+        terms.add(segNoArt);
+      }
     }
   }
 
   return Array.from(terms)
     .map(t => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim())
-    .filter(t => t.length >= 3)
+    .filter(t => t.length >= 3 && !GENERIC_SUBTITLE_STOPWORDS.has(t))
     .sort((a, b) => b.length - a.length);
 }
 
@@ -947,7 +973,25 @@ function resolvePinnedReviewsForDay(reviews, dayIso) {
   });
 }
 
-function pickDayReviewsAvoidingRecent(reviewsPool, dayIso, blockedKeys) {
+function getExhaustedMoviesInWindow(recentQueue) {
+  const counts = new Map();
+  for (const item of recentQueue) {
+    if (!item || !Array.isArray(item.movies)) continue;
+    for (const mv of item.movies) {
+      if (!mv) continue;
+      counts.set(mv, (counts.get(mv) || 0) + 1);
+    }
+  }
+  const exhausted = new Set();
+  for (const [mv, count] of counts.entries()) {
+    if (count >= MAX_MOVIE_ANSWERS_PER_MONTH) {
+      exhausted.add(mv);
+    }
+  }
+  return { exhausted, counts };
+}
+
+function pickDayReviewsAvoidingRecent(reviewsPool, dayIso, blockedKeys, blockedMovies = null) {
   const pinned = resolvePinnedReviewsForDay(reviewsPool, dayIso);
   if (pinned) return pinned.map(p => p.reviewObj);
 
@@ -966,8 +1010,9 @@ function pickDayReviewsAvoidingRecent(reviewsPool, dayIso, blockedKeys) {
   const selected = [];
   const usedMoviesToday = new Set();
 
-  // 1ª passada: filmes distintos + reviews que NÃO apareceram nos últimos 30 dias
+  // 1ª passada: filmes distintos + que não atingiram 2x no mês + reviews que NÃO apareceram nos últimos 30 dias
   for (const rev of ranked) {
+    if (blockedMovies && blockedMovies.has(rev.movie)) continue;
     if (!usedMoviesToday.has(rev.movie) && !blockedKeys.has(getReviewUniqueKey(rev))) {
       usedMoviesToday.add(rev.movie);
       selected.push(rev);
@@ -975,7 +1020,19 @@ function pickDayReviewsAvoidingRecent(reviewsPool, dayIso, blockedKeys) {
     }
   }
 
-  // Fallback caso o acervo inteiro fique abaixo de 5 fases disponíveis
+  // 2ª passada: permite outra review do filme caso todas as reviews inéditas tenham acabado, mas ainda respeitando o limite de 2x no mês
+  if (selected.length < TOTAL_PHASES) {
+    for (const rev of ranked) {
+      if (blockedMovies && blockedMovies.has(rev.movie)) continue;
+      if (!usedMoviesToday.has(rev.movie)) {
+        usedMoviesToday.add(rev.movie);
+        selected.push(rev);
+        if (selected.length === TOTAL_PHASES) break;
+      }
+    }
+  }
+
+  // Fallback final caso o acervo inteiro fique abaixo de 5 fases disponíveis
   if (selected.length < TOTAL_PHASES) {
     for (const rev of ranked) {
       if (!usedMoviesToday.has(rev.movie)) {
@@ -1046,11 +1103,11 @@ function buildDailyChallenge(reviews, allMovies, dateIso) {
     });
   }
 
-  // Garante que nenhuma review se repita em no mínimo 30 dias (se o filme repetir, usa outra review)
+  // Garante que nenhuma review se repita em no mínimo 30 dias e, a partir de 24/11, nenhum filme apareça >2x no mês
   const NO_REPEAT_DAYS = 30;
   const historyStartIso = addDaysIso(dateIso, -NO_REPEAT_DAYS);
   const firstTrackableIso = historyStartIso > LAUNCH_DATE_STR ? historyStartIso : LAUNCH_DATE_STR;
-  const recentQueue = []; // Lista cronológica [{ dayIso, keys }] dos últimos 30 dias
+  const recentQueue = []; // Lista cronológica [{ dayIso, keys, movies }] dos últimos 30 dias
   const blockedReviewKeys = new Set();
 
   for (let dIso = firstTrackableIso; dIso < dateIso; dIso = addDaysIso(dIso, 1)) {
@@ -1064,14 +1121,21 @@ function buildDailyChallenge(reviews, allMovies, dateIso) {
       const rIso = parseBrDateToIso(r.date);
       return !rIso || rIso < dIso;
     });
+    const enforceLimitOnDay = dIso >= MOVIE_LIMIT_RULE_START_DATE;
+    const dayBlockedMovies = enforceLimitOnDay
+      ? getExhaustedMoviesInWindow(recentQueue).exhausted
+      : null;
+
     const chosen = pickDayReviewsAvoidingRecent(
       dayPool.length >= TOTAL_PHASES ? dayPool : reviews,
       dIso,
-      blockedReviewKeys
+      blockedReviewKeys,
+      dayBlockedMovies
     );
     const chosenKeys = chosen.map(getReviewUniqueKey);
+    const chosenMovies = chosen.map(r => r.movie);
     chosenKeys.forEach(k => blockedReviewKeys.add(k));
-    recentQueue.push({ dayIso: dIso, keys: chosenKeys });
+    recentQueue.push({ dayIso: dIso, keys: chosenKeys, movies: chosenMovies });
   }
 
   // Limpa qualquer dia que tenha mais de 30 dias de diferença para `dateIso`
@@ -1083,16 +1147,43 @@ function buildDailyChallenge(reviews, allMovies, dateIso) {
   blockedReviewKeys.clear();
   recentQueue.forEach(item => item.keys.forEach(k => blockedReviewKeys.add(k)));
 
-  const selectedReviews = pickDayReviewsAvoidingRecent(pool, dateIso, blockedReviewKeys);
+  const enforceMovieLimitToday = dateIso >= MOVIE_LIMIT_RULE_START_DATE;
+  const { exhausted: blockedAnswerMoviesToday, counts: monthCountsBeforeToday } =
+    getExhaustedMoviesInWindow(recentQueue);
+
+  const selectedReviews = pickDayReviewsAvoidingRecent(
+    pool,
+    dateIso,
+    blockedReviewKeys,
+    enforceMovieLimitToday ? blockedAnswerMoviesToday : null
+  );
+
+  // Se um filme já apareceu 2x no mês (ou completou a 2ª vez como resposta hoje), não pode aparecer nem como alternativa!
+  const blockedAlternativeMoviesToday = new Set(
+    enforceMovieLimitToday ? blockedAnswerMoviesToday : []
+  );
+  if (enforceMovieLimitToday) {
+    for (const rev of selectedReviews) {
+      const newCount = (monthCountsBeforeToday.get(rev.movie) || 0) + 1;
+      if (newCount >= MAX_MOVIE_ANSWERS_PER_MONTH) {
+        blockedAlternativeMoviesToday.add(rev.movie);
+      }
+    }
+  }
 
   return selectedReviews.map((reviewObj, phaseIdx) => {
-    const wrongPool = moviePool
-      .filter(m => m !== reviewObj.movie)
-      .sort(
-        (a, b) =>
-          cyrb32(`${seedKey}|opt|${phaseIdx}|${getLegacySeedMovieTitle(a)}`) -
-          cyrb32(`${seedKey}|opt|${phaseIdx}|${getLegacySeedMovieTitle(b)}`)
-      );
+    const filteredWrongPool = moviePool.filter(
+      m => m !== reviewObj.movie && !blockedAlternativeMoviesToday.has(m)
+    );
+    const baseWrongPool =
+      filteredWrongPool.length >= 3
+        ? filteredWrongPool
+        : moviePool.filter(m => m !== reviewObj.movie);
+    const wrongPool = baseWrongPool.sort(
+      (a, b) =>
+        cyrb32(`${seedKey}|opt|${phaseIdx}|${getLegacySeedMovieTitle(a)}`) -
+        cyrb32(`${seedKey}|opt|${phaseIdx}|${getLegacySeedMovieTitle(b)}`)
+    );
     const distractors = wrongPool.slice(0, 3);
     const options = [reviewObj.movie, ...distractors].sort(
       (a, b) =>

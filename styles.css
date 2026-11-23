@@ -3268,6 +3268,33 @@ html, body {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
 }
 
+.leaderboard-scoring-legend {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--text-tertiary);
+  text-align: center;
+  white-space: nowrap;
+  margin: 2px 0 0;
+  letter-spacing: -0.005em;
+}
+
+.leaderboard-scoring-legend::before,
+.leaderboard-scoring-legend::after {
+  content: "";
+  flex: 1;
+  height: 0.5px;
+  background: var(--separator);
+}
+
+.leaderboard-scoring-legend .legend-dot {
+  opacity: 0.6;
+}
+
 /* ============================================================================
    PÁGINA DE AVALIAÇÃO DA QUINTA-FEIRA (IMDB DO OVAVAT — GOOGLE FORMS)
    ============================================================================ */
