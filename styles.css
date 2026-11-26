@@ -2710,7 +2710,7 @@ html, body {
 #modal-pokedex-dvd .pokedex-inspect-stage {
   width: 166px;
   height: 210px;
-  margin: -15px 0 15px;
+  margin: -1px 0 14px;
 }
 
 #pokedex-inspect-box {
