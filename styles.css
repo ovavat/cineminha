@@ -489,6 +489,17 @@ html, body {
   overflow: hidden;
   background: var(--bg-secondary);
   border: 0.5px solid var(--separator);
+  cursor: zoom-in;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.opt-poster-wrap:hover {
+  transform: scale(1.03);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.18);
+}
+
+.opt-poster-wrap:active {
+  transform: scale(0.96);
 }
 
 .opt-poster-img {
@@ -521,16 +532,55 @@ html, body {
 }
 
 .opt-status-icon {
-  width: 24px;
-  height: 24px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
-  font-size: 0.76rem;
-  font-weight: 700;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   color: #FFFFFF;
+}
+
+.opt-confirm-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #FFFFFF;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px -2px rgba(173, 57, 194, 0.45);
+  opacity: 0;
+  transform: scale(0.75);
+  pointer-events: none;
+  transition:
+    opacity 0.16s ease,
+    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 0.15s ease;
+}
+
+.option-poster-card.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+  box-shadow: 0 4px 14px rgba(173, 57, 194, 0.14);
+}
+
+.option-poster-card.is-selected .opt-confirm-btn {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+.opt-confirm-btn:hover {
+  filter: brightness(1.06);
+}
+
+.opt-confirm-btn:active {
+  transform: scale(0.9) !important;
+  background: var(--accent-pressed);
 }
 
 .opt-poster-wrap .poster-fallback {
@@ -2657,7 +2707,41 @@ html, body {
   letter-spacing: 0.08em;
 }
 
-/* Modal Inspetor 3D da Pokédex */
+#modal-pokedex-dvd .pokedex-inspect-stage {
+  width: 166px;
+  height: 210px;
+  margin: -15px 0 15px;
+}
+
+#pokedex-inspect-box {
+  width: 144px;
+  height: 210px;
+}
+
+#pokedex-inspect-box .dvd-spine {
+  height: 208px;
+  transform: rotateY(-90deg) translateZ(71.5px);
+}
+
+#pokedex-inspect-box .dvd-edge-right {
+  height: 208px;
+  transform: rotateY(90deg) translateZ(71.5px);
+}
+
+#pokedex-inspect-box .dvd-edge-top {
+  width: 142px;
+  transform: rotateX(90deg) translateZ(104.5px);
+}
+
+#pokedex-inspect-box .dvd-edge-bottom {
+  width: 142px;
+  transform: rotateX(-90deg) translateZ(104.5px);
+}
+
+#pokedex-inspect-shadow {
+  width: 128px;
+  bottom: -6px;
+}
 .pokedex-dvd-sheet {
   max-width: 380px;
 }
@@ -2715,6 +2799,12 @@ html, body {
   background: linear-gradient(135deg, rgba(255, 184, 0, 0.2) 0%, rgba(245, 158, 11, 0.28) 100%);
   color: #D97706;
   border: 1px solid rgba(245, 158, 11, 0.45);
+}
+
+.eyebrow-badge.mystery-eyebrow {
+  background: rgba(142, 142, 147, 0.16);
+  color: var(--text-secondary);
+  border: 1px solid rgba(142, 142, 147, 0.32);
 }
 
 [data-theme="dark"] .eyebrow-badge.shiny-eyebrow {

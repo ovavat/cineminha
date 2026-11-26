@@ -50,6 +50,7 @@ const state = {
   lastNotaPostersKey: "",
   dailyPhases: [],     // Array de 5 objetos: { reviewObj, extraReviews, options: [4 strings], correctIndex }
   currentPhase: 0,     // 0..4
+  pendingOptionIndex: null, // Índice (0..3) selecionado aguardando confirmação na fase atual
   answers: [],         // Array de { selectedIndex, correct, usedHint, movie, author, review }
   phaseHints: {},      // Mapa { [phaseIdx]: { usedHint: true, reviewIdx: 1 } }
   completed: false,
@@ -2354,15 +2355,44 @@ function renderCurrentPhase() {
       btn.disabled = true;
       if (idx === correctIndex) {
         btn.classList.add(existingAnswer.correct && existingAnswer.usedHint ? "correct-hint" : "correct");
-        statusHtml = `<span class="opt-status-icon">✓</span>`;
+        statusHtml = `
+          <span class="opt-status-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+          </span>
+        `;
       } else if (idx === existingAnswer.selectedIndex && !existingAnswer.correct) {
         btn.classList.add("wrong");
-        statusHtml = `<span class="opt-status-icon">✕</span>`;
+        statusHtml = `
+          <span class="opt-status-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </span>
+        `;
       } else {
         btn.classList.add("dimmed");
       }
     } else {
-      btn.addEventListener("click", () => handleSelectOption(idx));
+      if (state.pendingOptionIndex === idx) {
+        btn.classList.add("is-selected");
+      }
+      statusHtml = `
+        <span class="opt-confirm-btn" role="button" tabindex="0" title="Confirmar escolha" aria-label="Confirmar escolha">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+        </span>
+      `;
+      btn.addEventListener("click", () => {
+        if (state.answers[phaseIndex]) return;
+        state.pendingOptionIndex = idx;
+        optionsGrid.querySelectorAll(".option-poster-card").forEach((cardEl, cardIdx) => {
+          cardEl.classList.toggle("is-selected", cardIdx === idx);
+        });
+      });
     }
 
     const skelId = `opt-skel-${phaseIndex}-${idx}`;
@@ -2370,7 +2400,7 @@ function renderCurrentPhase() {
     const fbId = `opt-fb-${phaseIndex}-${idx}`;
 
     btn.innerHTML = `
-      <div class="opt-poster-wrap">
+      <div class="opt-poster-wrap" title="Ver DVD 3D">
         <div id="${skelId}" class="poster-skeleton"></div>
         <img id="${imgId}" class="opt-poster-img hidden" alt="${escapeHtml(movieOption)}" referrerpolicy="no-referrer" />
         <div id="${fbId}" class="poster-fallback hidden">
@@ -2383,6 +2413,18 @@ function renderCurrentPhase() {
         ${statusHtml}
       </div>
     `;
+
+    const posterWrapEl = btn.querySelector(".opt-poster-wrap");
+    posterWrapEl?.addEventListener("click", e => {
+      e.stopPropagation();
+      openPokedexDvdModal(movieOption, "???", { previewOnly: true });
+    });
+
+    const confirmBtnEl = btn.querySelector(".opt-confirm-btn");
+    confirmBtnEl?.addEventListener("click", e => {
+      e.stopPropagation();
+      handleSelectOption(idx);
+    });
 
     optionsGrid.appendChild(btn);
 
@@ -2496,6 +2538,7 @@ async function showRevealCard(phaseData, isCorrect, usedHint = false) {
 
 function handleSelectOption(selectedIndex) {
   if (state.answers[state.currentPhase]) return;
+  state.pendingOptionIndex = null;
 
   if (!state.dailyStartedAt || state.answers.length === 0) {
     state.dailyStartedAt = Date.now();
@@ -2532,6 +2575,7 @@ function handleSelectOption(selectedIndex) {
 
 function handleNextPhase() {
   setDvd3dMode(false);
+  state.pendingOptionIndex = null;
   if (state.currentPhase + 1 < TOTAL_PHASES) {
     state.currentPhase += 1;
     saveDailyProgress();
@@ -3550,7 +3594,8 @@ function buildStarsSvgHtml(starsOutOf5) {
   return html;
 }
 
-function openPokedexDvdModal(movieName, numStr) {
+function openPokedexDvdModal(movieName, numStr, options = {}) {
+  const { previewOnly = false } = options;
   const modal = document.getElementById("modal-pokedex-dvd");
   const sheetEl = modal ? modal.querySelector(".pokedex-dvd-sheet") : null;
   const numEl = document.getElementById("pokedex-modal-num");
@@ -3560,7 +3605,8 @@ function openPokedexDvdModal(movieName, numStr) {
   const reviewsEl = document.getElementById("pokedex-modal-reviews");
   if (!modal) return;
 
-  const rarity = getMovieRarityTier(movieName);
+  // No preview das alternativas (previewOnly), esconde se é Raro/Foil/Especial (sem badge e com as cores padrões do DVD 3D)
+  const rarity = previewOnly ? null : getMovieRarityTier(movieName);
   const rarityMeta = rarity ? RARITY_META[rarity] : null;
   if (sheetEl) {
     sheetEl.classList.remove("is-shiny", "is-foil", "is-especial");
@@ -3568,20 +3614,37 @@ function openPokedexDvdModal(movieName, numStr) {
   }
 
   if (numEl) {
-    numEl.className = `eyebrow-badge${rarity ? ` ${rarity}-eyebrow` : ""}`;
-    numEl.textContent = rarityMeta ? `${rarityMeta.icon} ${numStr} • ${rarityMeta.label}` : numStr;
+    if (previewOnly) {
+      numEl.style.visibility = "hidden";
+      numEl.className = "eyebrow-badge";
+      numEl.textContent = "";
+    } else if (rarity) {
+      numEl.style.visibility = "visible";
+      numEl.className = `eyebrow-badge ${rarity}-eyebrow`;
+      numEl.textContent = `${rarityMeta.icon} ${numStr} • ${rarityMeta.label}`;
+    } else {
+      numEl.style.visibility = "visible";
+      numEl.className = "eyebrow-badge";
+      numEl.textContent = numStr;
+    }
   }
   if (titleEl) titleEl.textContent = movieName;
   if (hintEl) {
-    const unlockedInfo = state.pokedex[movieName];
-    const isoDate = unlockedInfo && unlockedInfo.unlockedAt ? String(unlockedInfo.unlockedAt) : "";
-    const dateMatch = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (dateMatch) {
-      hintEl.textContent = `Adquirido em ${dateMatch[3]}/${dateMatch[2]}/${dateMatch[1]}`;
-    } else if (unlockedInfo) {
-      hintEl.textContent = "Adquirido na coleção";
+    hintEl.classList.remove("hidden");
+    hintEl.style.visibility = previewOnly ? "hidden" : "visible";
+    if (!previewOnly) {
+      const unlockedInfo = state.pokedex[movieName];
+      const isoDate = unlockedInfo && unlockedInfo.unlockedAt ? String(unlockedInfo.unlockedAt) : "";
+      const dateMatch = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (dateMatch) {
+        hintEl.textContent = `Adquirido em ${dateMatch[3]}/${dateMatch[2]}/${dateMatch[1]}`;
+      } else if (unlockedInfo) {
+        hintEl.textContent = "Adquirido na coleção";
+      } else {
+        hintEl.textContent = "Ainda não adquirido (modo vitrine)";
+      }
     } else {
-      hintEl.textContent = "Ainda não adquirido (modo vitrine)";
+      hintEl.textContent = "Adquirido em 00/00/0000";
     }
   }
   if (imgEl) {
@@ -3592,33 +3655,36 @@ function openPokedexDvdModal(movieName, numStr) {
   }
 
   if (reviewsEl) {
-    const movieObj = state.allMovies.find(m => getMovieTitle(m) === movieName);
-    const avg = movieObj && typeof movieObj.avgRating === "number" ? movieObj.avgRating : null;
-    const count = movieObj && movieObj.ratingCount ? movieObj.ratingCount : 0;
+    reviewsEl.classList.toggle("hidden", previewOnly);
+    if (!previewOnly) {
+      const movieObj = state.allMovies.find(m => getMovieTitle(m) === movieName);
+      const avg = movieObj && typeof movieObj.avgRating === "number" ? movieObj.avgRating : null;
+      const count = movieObj && movieObj.ratingCount ? movieObj.ratingCount : 0;
 
-    if (avg != null) {
-      // Converte nota 0..10 para 0..5 estrelas em passos de 0.5 (ex: 8,47 -> 4 estrelas; 4,21 -> 2 estrelas; 5,33 -> 2.5 estrelas)
-      const stars = Math.round(avg) / 2;
-      const avgFormatted = avg.toFixed(2).replace(".", ",");
-      const starsFormatted = String(stars).replace(".", ",");
-      reviewsEl.innerHTML = `
-        <div class="pokedex-rating-box${rarity ? ` is-${rarity}` : ""}">
-          <div class="pokedex-stars-row" aria-label="${starsFormatted} de 5 estrelas">
-            ${buildStarsSvgHtml(stars)}
+      if (avg != null) {
+        // Converte nota 0..10 para 0..5 estrelas em passos de 0.5 (ex: 8,47 -> 4 estrelas; 4,21 -> 2 estrelas; 5,33 -> 2.5 estrelas)
+        const stars = Math.round(avg) / 2;
+        const avgFormatted = avg.toFixed(2).replace(".", ",");
+        const starsFormatted = String(stars).replace(".", ",");
+        reviewsEl.innerHTML = `
+          <div class="pokedex-rating-box${rarity ? ` is-${rarity}` : ""}">
+            <div class="pokedex-stars-row" aria-label="${starsFormatted} de 5 estrelas">
+              ${buildStarsSvgHtml(stars)}
+            </div>
+            <div class="pokedex-rating-score-row">
+              <span class="pokedex-rating-avg">${avgFormatted}</span>
+              <span class="pokedex-rating-max">/ 10</span>
+            </div>
+            <span class="pokedex-rating-count">Média de ${count} ${count === 1 ? "nota" : "notas"}</span>
           </div>
-          <div class="pokedex-rating-score-row">
-            <span class="pokedex-rating-avg">${avgFormatted}</span>
-            <span class="pokedex-rating-max">/ 10</span>
+        `;
+      } else {
+        reviewsEl.innerHTML = `
+          <div class="pokedex-rating-box">
+            <span class="pokedex-rating-count">Sem notas registradas</span>
           </div>
-          <span class="pokedex-rating-count">Média de ${count} ${count === 1 ? "nota" : "notas"}</span>
-        </div>
-      `;
-    } else {
-      reviewsEl.innerHTML = `
-        <div class="pokedex-rating-box">
-          <span class="pokedex-rating-count">Sem notas registradas</span>
-        </div>
-      `;
+        `;
+      }
     }
   }
 
