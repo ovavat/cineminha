@@ -32,7 +32,7 @@ const STORAGE_KEYS = {
   POSTER_CACHE: "ovavat_poster_cache_v9_wikidata_ptbr",
   THEME: "ovavat_theme_v2_light",
   PWA_DISMISSED_DATE: "ovavat_pwa_dismissed_v1",
-  FORM_MOVIE: "ovavat_form_movie_v1",
+  FORM_MOVIE: "ovavat_form_movie_v2",
   FORM_VOTER: "ovavat_form_voter_v2_popup",
   FORM_VOTED_MOVIE: "ovavat_form_voted_movie_v1",
   NY_INTRO_SEEN_YEAR: "ovavat_ny_intro_seen_year_v1"
@@ -62,7 +62,7 @@ const state = {
   pokedex: {},         // Mapa { [movieName]: { unlockedAt, usedHint } }
   profileSession: null, // { username, displayName, pinHash }
   authMode: "login",   // "login" | "register"
-  rateMovieTitle: "Nome Próprio",
+  rateMovieTitle: "Férias Trocadas",
   rateSelectedVoter: "Outre",
   rateFetchingMovie: false,
   posterMemoryCache: {},
@@ -3177,14 +3177,14 @@ function getVotedFormMovie() {
 
 function isCurrentRateMovieVoted() {
   if (RATE_TEST_PREVIEW_UNLOCK) return false;
-  const currentMovie = (state.rateMovieTitle || "Nome Próprio").trim();
+  const currentMovie = (state.rateMovieTitle || "Férias Trocadas").trim();
   const votedMovie = getVotedFormMovie();
   return Boolean(currentMovie && votedMovie && currentMovie === votedMovie);
 }
 
 function isCurrentRateMovieExpired() {
   if (RATE_TEST_PREVIEW_UNLOCK) return false;
-  const currentMovie = (state.rateMovieTitle || "Nome Próprio").trim();
+  const currentMovie = (state.rateMovieTitle || "Férias Trocadas").trim();
   if (!currentMovie || !Array.isArray(state.allMovies)) return false;
   const movieObj = state.allMovies.find(m => getMovieTitle(m) === currentMovie);
   if (!movieObj || typeof movieObj.firstTs !== "number" || !Number.isFinite(movieObj.firstTs)) {
@@ -3201,6 +3201,21 @@ async function refreshSheetForRateView() {
       state.allMovies = fresh.movies;
       if (fresh.voterRatings) {
         state.voterRatings = fresh.voterRatings;
+      }
+      // Fallback sem proxy: se a planilha recebeu votos de um filme novo nas últimas 18h, sincroniza o título
+      const latestMovieObj = fresh.movies[fresh.movies.length - 1];
+      if (
+        latestMovieObj &&
+        latestMovieObj.title &&
+        typeof latestMovieObj.firstTs === "number" &&
+        Number.isFinite(latestMovieObj.firstTs) &&
+        Date.now() - latestMovieObj.firstTs < 18 * 60 * 60 * 1000 &&
+        latestMovieObj.title !== state.rateMovieTitle
+      ) {
+        state.rateMovieTitle = latestMovieObj.title;
+        try {
+          localStorage.setItem(STORAGE_KEYS.FORM_MOVIE, latestMovieObj.title);
+        } catch (_) {}
       }
       try {
         localStorage.setItem(STORAGE_KEYS.SHEET_CACHE, JSON.stringify(fresh));
@@ -3231,7 +3246,7 @@ function markRateMovieVoted(movieTitle) {
 }
 
 function renderRateMovieView() {
-  const movieName = state.rateMovieTitle || "Nome Próprio";
+  const movieName = state.rateMovieTitle || "Férias Trocadas";
   const titleEl = document.getElementById("rate-movie-title");
   const imgEl = document.getElementById("rate-dvd-img");
   const boxEl = document.getElementById("rate-dvd-box");
@@ -3341,33 +3356,63 @@ function parseMovieFromFormText(rawText) {
   return null;
 }
 
+async function fetchWithTimeout(url, timeoutMs = 4500) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, { cache: "no-store", signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function syncFormMovieFromGoogleForms() {
   if (state.rateFetchingMovie) return;
   state.rateFetchingMovie = true;
 
   try {
     let detectedMovie = null;
+    const formUrlWithBust = `${GOOGLE_FORM_VIEW_URL}?_t=${Math.floor(Date.now() / 60000)}`;
+    const enc = encodeURIComponent(formUrlWithBust);
+    const encPlain = encodeURIComponent(GOOGLE_FORM_VIEW_URL);
 
-    // Tentativa 1: r.jina.ai (rápido e com CORS liberado para GitHub Pages)
+    // Tentativa 1: api.cors.lol (rápido e sem bloqueio para docs.google.com)
     try {
-      const res = await fetch(`https://r.jina.ai/${GOOGLE_FORM_VIEW_URL}`, {
-        cache: "no-store"
-      });
-      if (res.ok) {
-        const text = await res.text();
-        detectedMovie = parseMovieFromFormText(text);
+      const res1 = await fetchWithTimeout(`https://api.cors.lol/?url=${encPlain}`, 4500);
+      if (res1.ok) {
+        const text1 = await res1.text();
+        detectedMovie = parseMovieFromFormText(text1);
       }
     } catch (_) {}
 
-    // Tentativa 2: allorigins JSON
+    // Tentativa 2: r.jina.ai
     if (!detectedMovie) {
       try {
-        const enc = encodeURIComponent(GOOGLE_FORM_VIEW_URL);
-        const res2 = await fetch(`https://api.allorigins.win/get?url=${enc}`, {
-          cache: "no-store"
-        });
+        const res2 = await fetchWithTimeout(`https://r.jina.ai/${GOOGLE_FORM_VIEW_URL}`, 4500);
         if (res2.ok) {
-          const data = await res2.json();
+          const text2 = await res2.text();
+          detectedMovie = parseMovieFromFormText(text2);
+        }
+      } catch (_) {}
+    }
+
+    // Tentativa 3: allorigins raw
+    if (!detectedMovie) {
+      try {
+        const res3 = await fetchWithTimeout(`https://api.allorigins.win/raw?url=${enc}`, 4500);
+        if (res3.ok) {
+          const text3 = await res3.text();
+          detectedMovie = parseMovieFromFormText(text3);
+        }
+      } catch (_) {}
+    }
+
+    // Tentativa 4: allorigins JSON
+    if (!detectedMovie) {
+      try {
+        const res4 = await fetchWithTimeout(`https://api.allorigins.win/get?url=${enc}`, 4500);
+        if (res4.ok) {
+          const data = await res4.json();
           detectedMovie = parseMovieFromFormText(data && data.contents);
         }
       } catch (_) {}
@@ -3400,7 +3445,7 @@ async function handleRateFormSubmit(e) {
     return;
   }
 
-  const movieTitle = state.rateMovieTitle || "Nome Próprio";
+  const movieTitle = state.rateMovieTitle || "Férias Trocadas";
   const nota = document.getElementById("rate-slider-nota")?.value ?? "0";
   const riso = document.getElementById("rate-slider-riso")?.value ?? "0";
   const lacre = document.getElementById("rate-slider-lacre")?.value ?? "0";
